@@ -400,16 +400,9 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                     except (ValueError, TypeError):
                         pass
 
-                    # TCP Timestamps (CRITICAL!)
-                    tcp_timestamp_forward = None
-                    tcp_timestamp_backward = None
-                    try:
-                        if len(fields) > 91 and fields[91]:
-                            tcp_timestamp_forward = int(fields[91])
-                        if len(fields) > 92 and fields[92]:
-                            tcp_timestamp_backward = int(fields[92])
-                    except (ValueError, TypeError):
-                        pass
+                    # TCP Timestamps - REMOVED: 0.00% availability in Masaryk dataset
+                    # NOTE: CSV fields 91-92 exist but contain no data
+                    # Keeping this comment for documentation purposes
 
                     # TCP Window Scale (HIGH importance)
                     tcp_win_scale_forward = None
@@ -493,8 +486,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                         # TCP fingerprinting features (MASSIVELY ENHANCED!)
                         'tcp_win_size': tcp_win_size,  # Original
                         'tcp_syn_size': tcp_syn_size,  # Original
-                        'tcp_timestamp_forward': tcp_timestamp_forward,  # NEW: CRITICAL!
-                        'tcp_timestamp_backward': tcp_timestamp_backward,  # NEW: CRITICAL!
+                        # tcp_timestamp_forward/backward REMOVED - 0.00% availability
                         'tcp_win_scale_forward': tcp_win_scale_forward,  # NEW: HIGH importance
                         'tcp_win_scale_backward': tcp_win_scale_backward,  # NEW: HIGH importance
                         'tcp_sack_permitted_forward': tcp_sack_permitted_forward,  # NEW: MEDIUM
@@ -578,7 +570,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     print(f"\nTCP/IP fingerprinting features completeness:")
     fingerprint_features = [
         'tcp_win_size', 'tcp_syn_size', 'ttl',
-        'tcp_timestamp_forward', 'tcp_timestamp_backward',
+        # 'tcp_timestamp_forward', 'tcp_timestamp_backward',  # REMOVED - 0.00% availability
         'tcp_win_scale_forward', 'tcp_win_scale_backward',
         'tcp_mss_forward', 'tcp_mss_backward',
         'df_flag_forward', 'df_flag_backward',
@@ -653,11 +645,11 @@ def main():
     print("\n✓ Success! Dataset ready for Model 1 (family classification) training.")
     print(f"\nThis dataset contains TCP SYN FLOW-level features with OS FAMILY labels:")
     print(f"  - FILTERED: Only TCP flows with SYN flag present")
-    print(f"  - Enhanced TCP/IP fingerprinting features (17 new bidirectional features!)")
-    print(f"  - CRITICAL features: TCP timestamps, IP ToS, bidirectional TCP options")
+    print(f"  - Enhanced TCP/IP fingerprinting features (15 new bidirectional features!)")
+    print(f"  - CRITICAL features: IP ToS, DF flags, bidirectional TCP options (MSS, Win Scale, etc.)")
     print(f"  - Flow statistics (packet counts, duration, byte rates)")
     print(f"  - Use this for predicting OS FAMILY (Windows/Linux/macOS/iOS/Android)")
-    print(f"  - Masaryk provides rich TCP/IP features from connection establishment!")
+    print(f"  - Note: TCP timestamps removed (0.00% availability in Masaryk CSV)")
 
 
 if __name__ == '__main__':

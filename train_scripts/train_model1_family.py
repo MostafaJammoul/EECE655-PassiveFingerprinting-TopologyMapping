@@ -66,8 +66,8 @@ def select_features(df, verbose=True):
         'tcp_mss_backward',  # NEW: HIGH importance
         'tcp_sack_permitted_forward',  # NEW: MEDIUM importance
         'tcp_sack_permitted_backward',  # NEW: MEDIUM importance
-        'tcp_timestamp_forward',  # NEW: CRITICAL! Timestamp granularity differs by OS
-        'tcp_timestamp_backward',  # NEW: CRITICAL!
+        # 'tcp_timestamp_forward',  # REMOVED - 0.00% availability in Masaryk
+        # 'tcp_timestamp_backward',  # REMOVED - 0.00% availability in Masaryk
         'tcp_nop_forward',  # NEW: LOW importance
         'tcp_nop_backward',  # NEW: LOW importance
     ]
