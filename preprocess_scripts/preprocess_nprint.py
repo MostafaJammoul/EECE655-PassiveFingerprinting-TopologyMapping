@@ -1,425 +1,457 @@
 #!/usr/bin/env python3
 """
-Preprocess nPrint Dataset - Extract Packet-Level Features for OS Fingerprinting
+PCAPNG to CSV Converter with Metadata Extraction
+Extracts TCP/IP features AND OS labels from pcapng packet comments
 
-Input:  data/raw/nprint/*.csv (or *.npz or *.pcap)
-Output: data/processed/nprint_packets.csv
+This script specifically handles nprint-style pcapng files where OS labels
+are embedded in packet comments as: "sampleID,os_family_os_version"
 
-The nPrint dataset can come in various formats. This script handles:
-- Pre-extracted CSV files with features
-- NPZ files (numpy arrays)
-- PCAP files (if using raw nPrint captures)
+Usage:
+    python pcapng_to_csv_with_metadata.py input.pcapng output.csv
+    python pcapng_to_csv_with_metadata.py input.pcapng output.csv --syn-only
+
+Features:
+    - Extracts OS labels from packet comments (nprint format)
+    - Extracts TCP/IP fingerprinting features
+    - Compatible with Windows, Linux, macOS
 """
 
-import os
 import sys
-import pandas as pd
-import numpy as np
-from pathlib import Path
 import argparse
+from pathlib import Path
 
-# Try importing optional dependencies
 try:
-    from tqdm import tqdm
+    from scapy.all import rdpcap, IP, TCP, PcapNgReader
 except ImportError:
-    def tqdm(iterable, **kwargs):
-        return iterable
+    print("ERROR: Scapy not installed.")
+    print("Install with: pip install scapy")
+    sys.exit(1)
+
+try:
+    import pandas as pd
+except ImportError:
+    print("ERROR: pandas not installed.")
+    print("Install with: pip install pandas")
+    sys.exit(1)
 
 
 # ============================================================================
-# OS FAMILY EXTRACTION
+# HELPER FUNCTIONS
 # ============================================================================
 
-def extract_os_family(os_label):
-    """Extract OS family from detailed OS label"""
-    os_lower = str(os_label).lower()
+def parse_os_label_from_comment(comment):
+    """
+    Parse OS label from nprint-style packet comment
 
-    if any(w in os_lower for w in ['windows', 'win10', 'win11', 'win7', 'win8', 'microsoft']):
+    Format: "sampleID,os_family_os_version"
+    Examples:
+        "9574731881961193404,ubuntu_ubuntu-server" → ("ubuntu", "ubuntu-server")
+        "15768607979814747063,ubuntu_ubuntu-14.4-32b" → ("ubuntu", "ubuntu-14.4-32b")
+        "9957971904990215253,windows_windows-vista" → ("windows", "windows-vista")
+
+    Returns:
+        (os_family, os_version) or (None, None) if parsing fails
+    """
+    if not comment:
+        return None, None
+
+    comment = str(comment).strip()
+
+    # Split by comma
+    parts = comment.split(',')
+    if len(parts) < 2:
+        return None, None
+
+    # Second part is "easylabel_hardlabel"
+    label_part = parts[1]
+
+    # Split by underscore
+    label_parts = label_part.split('_', 1)
+    if len(label_parts) < 2:
+        # Sometimes there's only one part
+        return None, label_parts[0]
+
+    os_family = label_parts[0]
+    os_version = label_parts[1]
+
+    return os_family, os_version
+
+
+def normalize_os_family(os_family_raw):
+    """
+    Normalize OS family to standard names
+
+    Examples:
+        "ubuntu" → "Linux"
+        "windows" → "Windows"
+        "mac" → "macOS"
+    """
+    if not os_family_raw:
+        return 'Unknown'
+
+    os_lower = str(os_family_raw).lower()
+
+    if 'windows' in os_lower or 'win' in os_lower:
         return 'Windows'
-    elif any(w in os_lower for w in ['ubuntu', 'debian', 'fedora', 'centos', 'linux', 'kali', 'mint', 'arch', 'redhat']):
+    elif any(w in os_lower for w in ['ubuntu', 'debian', 'linux', 'fedora', 'centos', 'kali']):
         return 'Linux'
-    elif any(w in os_lower for w in ['macos', 'darwin', 'osx', 'mac']):
+    elif 'mac' in os_lower or 'osx' in os_lower or 'darwin' in os_lower:
         return 'macOS'
     elif 'android' in os_lower:
         return 'Android'
-    elif any(w in os_lower for w in ['ios', 'iphone', 'ipad']):
+    elif 'ios' in os_lower:
         return 'iOS'
-    elif 'bsd' in os_lower:
-        return 'BSD'
     else:
         return 'Other'
 
 
-# ============================================================================
-# CSV PARSING
-# ============================================================================
-
-def parse_nprint_csv(csv_path, verbose=True):
+def normalize_os_version(os_version_raw):
     """
-    Parse nPrint CSV file and map to our unified schema
+    Normalize OS version to readable format
 
-    nPrint CSV files may have different column names depending on version.
-    We'll try to map common column names to our schema.
+    Examples:
+        "ubuntu-server" → "Ubuntu Server"
+        "ubuntu-14.4-32b" → "Ubuntu 14.4 32-bit"
+        "windows-vista" → "Windows Vista"
     """
-    if verbose:
-        print(f"  Parsing CSV: {csv_path.name}")
+    if not os_version_raw:
+        return 'Unknown'
 
-    try:
-        df = pd.read_csv(csv_path, low_memory=False)
-    except Exception as e:
-        print(f"  ERROR reading {csv_path}: {e}")
+    version = str(os_version_raw).strip()
+
+    # Replace hyphens and underscores with spaces
+    version = version.replace('-', ' ').replace('_', ' ')
+
+    # Capitalize words
+    version = ' '.join(word.capitalize() for word in version.split())
+
+    # Fix common abbreviations
+    version = version.replace('32b', '32-bit')
+    version = version.replace('64b', '64-bit')
+    version = version.replace('Osx', 'OSX')
+
+    return version
+
+
+def extract_tcp_options_order(tcp_packet):
+    """Extract TCP options in order (highly discriminative!)"""
+    if not hasattr(tcp_packet, 'options'):
         return None
 
-    if verbose:
-        print(f"    Loaded {len(df)} records, {len(df.columns)} columns")
-        print(f"    Columns: {list(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
+    options = []
+    for opt in tcp_packet.options:
+        if isinstance(opt, tuple) and len(opt) >= 1:
+            options.append(str(opt[0]))
+        elif isinstance(opt, str):
+            options.append(opt)
 
-    # Initialize output records
-    records = []
+    return ':'.join(options) if options else None
 
-    # Detect column mapping (nPrint datasets vary)
-    # Common column name patterns:
-    label_col = None
-    ttl_col = None
-    window_col = None
-    mss_col = None
 
-    # Try to find label column
-    for col in df.columns:
-        col_lower = col.lower()
-        if col_lower in ['label', 'os_label', 'os', 'operating_system', 'class']:
-            label_col = col
-            break
-
-    # Try to find network feature columns
-    for col in df.columns:
-        col_lower = col.lower()
-        if 'ttl' in col_lower:
-            ttl_col = col
-        elif any(w in col_lower for w in ['window', 'win_size', 'window_size']):
-            window_col = col
-        elif 'mss' in col_lower:
-            mss_col = col
-
-    if not label_col:
-        print(f"  WARNING: No label column found in {csv_path.name}")
-        print(f"  Available columns: {list(df.columns)}")
+def extract_tcp_mss(tcp_packet):
+    """Extract Maximum Segment Size from TCP options"""
+    if not hasattr(tcp_packet, 'options'):
         return None
 
-    # Process each row
-    for idx, row in df.iterrows():
-        os_label = row[label_col]
-
-        record = {
-            # Metadata
-            'dataset_source': 'nprint',
-            'record_id': f"nprint_{csv_path.stem}_{idx}",
-            'timestamp': None,
-
-            # Network info (may not be available)
-            'src_ip': row.get('src_ip', None),
-            'dst_ip': row.get('dst_ip', None),
-            'protocol': row.get('protocol', None),
-            'src_port': row.get('src_port', None),
-            'dst_port': row.get('dst_port', None),
-
-            # IP layer features
-            'ttl': row[ttl_col] if ttl_col and ttl_col in row else None,
-            'initial_ttl': None,  # Will calculate if TTL available
-            'df_flag': row.get('df_flag', None),
-            'ip_len': row.get('ip_len', None),
-
-            # TCP layer features
-            'tcp_window_size': row[window_col] if window_col and window_col in row else None,
-            'tcp_window_scale': row.get('tcp_window_scale', None),
-            'tcp_mss': row[mss_col] if mss_col and mss_col in row else None,
-            'tcp_options_order': row.get('tcp_options_order', None),
-            'tcp_flags': row.get('tcp_flags', None),
-
-            # Labels
-            'os_label': str(os_label),
-            'os_family': extract_os_family(os_label),
-        }
-
-        # Calculate initial TTL if available
-        if record['ttl'] is not None:
-            ttl_val = record['ttl']
-            for initial in [32, 64, 128, 255]:
-                if ttl_val <= initial:
-                    record['initial_ttl'] = initial
-                    break
-            if record['initial_ttl'] is None:
-                record['initial_ttl'] = 255
-
-        records.append(record)
-
-    df_out = pd.DataFrame(records)
-
-    if verbose:
-        print(f"    Extracted {len(df_out)} records")
-        print(f"    OS labels: {df_out['os_label'].nunique()} unique")
-
-    return df_out
+    for opt in tcp_packet.options:
+        if isinstance(opt, tuple) and len(opt) >= 2:
+            if opt[0] == 'MSS':
+                return opt[1]
+    return None
 
 
-# ============================================================================
-# NPZ PARSING (if nPrint provides numpy arrays)
-# ============================================================================
-
-def parse_nprint_npz(npz_path, verbose=True):
-    """
-    Parse nPrint NPZ file (numpy compressed arrays)
-
-    NPZ files typically contain:
-    - X: feature matrix (N x F)
-    - y: labels (N,)
-    - feature_names: list of feature names
-
-    We'll try to map these to our schema.
-    """
-    if verbose:
-        print(f"  Parsing NPZ: {npz_path.name}")
-
-    try:
-        data = np.load(npz_path, allow_pickle=True)
-    except Exception as e:
-        print(f"  ERROR reading {npz_path}: {e}")
+def extract_tcp_window_scale(tcp_packet):
+    """Extract Window Scale factor from TCP options"""
+    if not hasattr(tcp_packet, 'options'):
         return None
 
-    if verbose:
-        print(f"    Keys: {list(data.keys())}")
+    for opt in tcp_packet.options:
+        if isinstance(opt, tuple) and len(opt) >= 2:
+            if opt[0] == 'WScale':
+                return opt[1]
+    return None
 
-    # Try to find labels and features
-    labels = None
-    features = None
-    feature_names = None
 
-    # Common key patterns
-    if 'y' in data:
-        labels = data['y']
-    elif 'labels' in data:
-        labels = data['labels']
-
-    if 'X' in data:
-        features = data['X']
-    elif 'features' in data:
-        features = data['features']
-
-    if 'feature_names' in data:
-        feature_names = data['feature_names']
-
-    if labels is None:
-        print(f"  WARNING: No labels found in {npz_path.name}")
-        return None
-
-    if features is None:
-        print(f"  WARNING: No features found in {npz_path.name}")
-        # Can still process labels only
-        records = []
-        for idx, label in enumerate(labels):
-            records.append({
-                'dataset_source': 'nprint',
-                'record_id': f"nprint_{npz_path.stem}_{idx}",
-                'os_label': str(label),
-                'os_family': extract_os_family(label),
-                # All other fields None
-                **{k: None for k in ['timestamp', 'src_ip', 'dst_ip', 'protocol',
-                                     'src_port', 'dst_port', 'ttl', 'initial_ttl',
-                                     'df_flag', 'ip_len', 'tcp_window_size',
-                                     'tcp_window_scale', 'tcp_mss', 'tcp_options_order', 'tcp_flags']}
-            })
-        return pd.DataFrame(records)
-
-    # If we have features, try to map them
-    records = []
-    for idx in range(len(labels)):
-        feature_vec = features[idx]
-        label = labels[idx]
-
-        record = {
-            'dataset_source': 'nprint',
-            'record_id': f"nprint_{npz_path.stem}_{idx}",
-            'os_label': str(label),
-            'os_family': extract_os_family(label),
-            # Try to extract known features if feature_names available
-            # Otherwise all None
-        }
-
-        # If feature names available, try to map
-        if feature_names is not None:
-            for feat_idx, feat_name in enumerate(feature_names):
-                feat_lower = str(feat_name).lower()
-                if 'ttl' in feat_lower:
-                    record['ttl'] = feature_vec[feat_idx]
-                elif 'window' in feat_lower:
-                    record['tcp_window_size'] = feature_vec[feat_idx]
-                elif 'mss' in feat_lower:
-                    record['tcp_mss'] = feature_vec[feat_idx]
-                # Add more mappings as needed
-
-        records.append(record)
-
-    df_out = pd.DataFrame(records)
-
-    if verbose:
-        print(f"    Extracted {len(df_out)} records")
-
-    return df_out
+def calculate_initial_ttl(ttl):
+    """Estimate original TTL value based on observed TTL"""
+    common_ttls = [32, 64, 128, 255]
+    for initial in common_ttls:
+        if ttl <= initial:
+            return initial
+    return 255
 
 
 # ============================================================================
-# MAIN PIPELINE
+# PCAPNG PROCESSING
 # ============================================================================
 
-def preprocess_nprint(raw_dir='data/raw/nprint',
-                      output_dir='data/processed',
-                      verbose=True):
+def process_pcapng_with_metadata(pcap_path, syn_only=True, verbose=True):
     """
-    Main preprocessing pipeline for nPrint dataset
-
-    Handles CSV, NPZ, and potentially PCAP formats
+    Process PCAPNG file and extract features + OS labels from comments
 
     Args:
-        raw_dir: Directory containing nPrint data files
-        output_dir: Where to save processed CSV
+        pcap_path: Path to PCAPNG file
+        syn_only: If True, only process SYN packets
         verbose: Print progress
 
     Returns:
-        DataFrame with extracted features
+        DataFrame with extracted features and OS labels
     """
 
-    print("="*70)
-    print("NPRINT DATASET PREPROCESSING")
-    print("="*70)
-    print(f"\nInput:  {raw_dir}")
-    print(f"Output: {output_dir}/nprint_packets.csv")
+    if verbose:
+        print(f"\nProcessing: {pcap_path}")
+        print(f"Filter: {'SYN packets only' if syn_only else 'All TCP packets'}")
 
-    raw_path = Path(raw_dir)
+    # Read PCAPNG file
+    try:
+        if verbose:
+            print(f"\nReading packets from {pcap_path}...")
 
-    if not raw_path.exists():
-        print(f"\nERROR: Directory not found: {raw_dir}")
-        print("\nPlease download nPrint dataset first.")
-        print("See DATASET_SETUP_GUIDE.md for instructions.")
+        # Try using PcapNgReader to preserve comments
+        packets = []
+        comments_map = {}
+
+        try:
+            with PcapNgReader(str(pcap_path)) as reader:
+                for idx, packet in enumerate(reader):
+                    packets.append(packet)
+
+                    # Try to get comment from packet metadata
+                    if hasattr(packet, 'comment'):
+                        comments_map[idx] = packet.comment
+                    elif hasattr(packet, 'time'):
+                        # Some versions store it differently
+                        if hasattr(packet, 'pkt_comment'):
+                            comments_map[idx] = packet.pkt_comment
+
+        except Exception as e:
+            if verbose:
+                print(f"  PcapNgReader failed: {e}")
+                print(f"  Trying rdpcap fallback...")
+            packets = rdpcap(str(pcap_path))
+
+        if verbose:
+            print(f"  Loaded {len(packets)} packets")
+            if comments_map:
+                print(f"  Found comments in {len(comments_map)} packets")
+
+    except Exception as e:
+        print(f"ERROR reading {pcap_path}: {e}")
         return None
 
-    # Discover data files
-    print(f"\n[1/3] Discovering data files...")
-    csv_files = list(raw_path.glob('**/*.csv'))
-    npz_files = list(raw_path.glob('**/*.npz'))
+    # Extract features from packets
+    records = []
+    tcp_count = 0
+    syn_count = 0
+    labeled_count = 0
 
-    print(f"  Found {len(csv_files)} CSV files")
-    print(f"  Found {len(npz_files)} NPZ files")
+    if verbose:
+        print(f"\nExtracting features...")
 
-    if not csv_files and not npz_files:
-        print(f"\nERROR: No supported files found in {raw_dir}")
-        print(f"Expected: .csv or .npz files")
-        print(f"\nMake sure you downloaded and extracted the nPrint dataset.")
-        return None
+    for pkt_idx, packet in enumerate(packets):
+        # Must have IP and TCP layers
+        if not (packet.haslayer(IP) and packet.haslayer(TCP)):
+            continue
 
-    # Process files
-    print(f"\n[2/3] Parsing data files...")
-    all_dfs = []
+        tcp_count += 1
+        ip_layer = packet[IP]
+        tcp_layer = packet[TCP]
 
-    # Process CSV files
-    if csv_files:
-        for csv_file in tqdm(csv_files, desc="Processing CSVs"):
-            df_chunk = parse_nprint_csv(csv_file, verbose=False)
-            if df_chunk is not None:
-                all_dfs.append(df_chunk)
+        # Check if this is a SYN packet
+        is_syn = (tcp_layer.flags & 0x02) != 0
+        is_ack = (tcp_layer.flags & 0x10) != 0
 
-    # Process NPZ files
-    if npz_files:
-        for npz_file in tqdm(npz_files, desc="Processing NPZs"):
-            df_chunk = parse_nprint_npz(npz_file, verbose=False)
-            if df_chunk is not None:
-                all_dfs.append(df_chunk)
+        if is_syn:
+            syn_count += 1
 
-    if not all_dfs:
-        print("\nERROR: No records extracted from any files!")
-        return None
+        # Skip non-SYN packets if syn_only is True
+        if syn_only and not is_syn:
+            continue
 
-    # Combine all dataframes
-    df = pd.concat(all_dfs, ignore_index=True)
-
-    print(f"  Total records extracted: {len(df):,}")
-
-    # Save
-    print(f"\n[3/3] Saving processed dataset...")
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, 'nprint_packets.csv')
-    df.to_csv(output_path, index=False)
-    print(f"  Saved to: {output_path}")
-
-    # Summary statistics
-    print("\n" + "="*70)
-    print("PREPROCESSING COMPLETE")
-    print("="*70)
-    print(f"\nDataset shape: {df.shape}")
-    print(f"  Records: {len(df):,}")
-    print(f"  Features: {len(df.columns)}")
-
-    print(f"\nOS Family distribution:")
-    print(df['os_family'].value_counts())
-
-    print(f"\nOS Version distribution (top 10):")
-    print(df['os_label'].value_counts().head(10))
-
-    print(f"\nFeature availability:")
-    critical_features = ['ttl', 'tcp_window_size', 'tcp_mss', 'tcp_options_order']
-    for feat in critical_features:
-        if feat in df.columns:
-            pct_available = (df[feat].notna().sum() / len(df)) * 100
-            print(f"  {feat}: {pct_available:.1f}%")
+        # Determine packet type
+        if is_syn and not is_ack:
+            packet_type = 'SYN'
+        elif is_syn and is_ack:
+            packet_type = 'SYN-ACK'
+        elif is_ack:
+            packet_type = 'ACK'
         else:
-            print(f"  {feat}: not available")
+            packet_type = 'OTHER'
+
+        # Try to get OS label from comment
+        comment = comments_map.get(pkt_idx, None)
+        os_family_raw, os_version_raw = parse_os_label_from_comment(comment)
+
+        if os_family_raw:
+            labeled_count += 1
+
+        os_family = normalize_os_family(os_family_raw)
+        os_version = normalize_os_version(os_version_raw)
+
+        # Combine for os_label
+        if os_version_raw:
+            os_label = os_version
+        elif os_family_raw:
+            os_label = os_family
+        else:
+            os_label = 'Unknown'
+
+        # Extract features
+        record = {
+            # Metadata
+            'record_id': f"pkt_{pkt_idx}",
+            'timestamp': float(packet.time) if hasattr(packet, 'time') else None,
+            'packet_type': packet_type,
+
+            # IP layer
+            'src_ip': ip_layer.src,
+            'dst_ip': ip_layer.dst,
+            'protocol': ip_layer.proto,
+            'ttl': ip_layer.ttl,
+            'initial_ttl': calculate_initial_ttl(ip_layer.ttl),
+            'df_flag': 1 if (ip_layer.flags & 0x2) else 0,
+            'ip_len': ip_layer.len if hasattr(ip_layer, 'len') else len(packet),
+
+            # TCP layer
+            'src_port': tcp_layer.sport,
+            'dst_port': tcp_layer.dport,
+            'tcp_window_size': tcp_layer.window,
+            'tcp_flags': int(tcp_layer.flags),
+
+            # TCP options
+            'tcp_mss': extract_tcp_mss(tcp_layer),
+            'tcp_window_scale': extract_tcp_window_scale(tcp_layer),
+            'tcp_options_order': extract_tcp_options_order(tcp_layer),
+
+            # Labels (from packet comments!)
+            'os_label': os_label,
+            'os_family': os_family,
+
+            # Debug info
+            'comment_raw': comment if comment else None,
+        }
+
+        records.append(record)
+
+    # Summary
+    if verbose:
+        print(f"\nPacket statistics:")
+        print(f"  Total packets in file: {len(packets)}")
+        print(f"  TCP packets: {tcp_count}")
+        print(f"  SYN packets: {syn_count}")
+        print(f"  Packets extracted: {len(records)}")
+        print(f"  Packets with OS labels: {labeled_count}")
+
+        if labeled_count == 0:
+            print("\n  WARNING: No OS labels found in packet comments!")
+            print("  This might not be an nprint-formatted pcapng file.")
+            print("  Or Scapy version doesn't support reading pcapng comments.")
+            print("\n  Solution: Try using tshark or install pypcapng:")
+            print("    pip install pypcapng")
+
+    if not records:
+        print("\nERROR: No packets extracted!")
+        return None
+
+    # Convert to DataFrame
+    df = pd.DataFrame(records)
+
+    # Show statistics
+    if verbose:
+        print(f"\nFeature completeness:")
+        critical_features = ['ttl', 'tcp_window_size', 'tcp_mss', 'tcp_options_order']
+        for feat in critical_features:
+            if feat in df.columns:
+                pct_available = (df[feat].notna().sum() / len(df)) * 100
+                print(f"  {feat}: {pct_available:.1f}%")
+
+        print(f"\nOS Label distribution:")
+        print(df['os_label'].value_counts().head(10))
+
+        print(f"\nOS Family distribution:")
+        print(df['os_family'].value_counts())
 
     return df
 
 
 # ============================================================================
-# CLI
+# MAIN
 # ============================================================================
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Preprocess nPrint dataset - extract packet-level features'
+        description='Extract TCP/IP features and OS labels from nprint-style PCAPNG files',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Basic usage
+  python pcapng_to_csv_with_metadata.py nprint_file.pcapng output.csv
+
+  # Extract all TCP packets (not just SYN)
+  python pcapng_to_csv_with_metadata.py nprint_file.pcapng output.csv --all-tcp
+
+Features extracted:
+  - TCP/IP fingerprinting features (TTL, window size, MSS, options order, etc.)
+  - OS labels from packet comments (nprint format)
+  - OS family (auto-normalized to Windows/Linux/macOS/etc.)
+        """
     )
 
-    parser.add_argument(
-        '--input',
-        type=str,
-        default='data/raw/nprint',
-        help='Input directory with nPrint data files'
-    )
-
-    parser.add_argument(
-        '--output',
-        type=str,
-        default='data/processed',
-        help='Output directory for processed CSV'
-    )
-
-    parser.add_argument(
-        '--quiet',
-        action='store_true',
-        help='Suppress verbose output'
-    )
+    parser.add_argument('input', type=str, help='Input PCAPNG file')
+    parser.add_argument('output', type=str, help='Output CSV file')
+    parser.add_argument('--all-tcp', action='store_true', help='Extract all TCP packets (default: SYN only)')
+    parser.add_argument('--quiet', action='store_true', help='Suppress output')
 
     args = parser.parse_args()
 
-    # Run preprocessing
-    df = preprocess_nprint(
-        raw_dir=args.input,
-        output_dir=args.output,
+    # Validate input
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"ERROR: Input file not found: {args.input}")
+        sys.exit(1)
+
+    # Process
+    print("="*70)
+    print("PCAPNG TO CSV CONVERTER (WITH METADATA)")
+    print("="*70)
+
+    df = process_pcapng_with_metadata(
+        pcap_path=input_path,
+        syn_only=not args.all_tcp,
         verbose=not args.quiet
     )
 
     if df is None:
+        print("\nERROR: No data extracted!")
         sys.exit(1)
 
-    print("\n✓ Success! Dataset ready for merging.")
-    print(f"\nNext steps:")
-    print(f"  1. Merge with CESNET idle: python scripts/merge_packet_datasets.py")
+    # Save
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not args.quiet:
+        print(f"\nSaving to CSV...")
+
+    # Drop debug column before saving
+    if 'comment_raw' in df.columns:
+        df_save = df.drop(columns=['comment_raw'])
+    else:
+        df_save = df
+
+    df_save.to_csv(output_path, index=False)
+
+    print("\n" + "="*70)
+    print("SUCCESS!")
+    print("="*70)
+    print(f"\nOutput: {output_path}")
+    print(f"Records: {len(df):,}")
+    print(f"Features: {len(df.columns)}")
+
+    if not args.quiet:
+        print(f"\nDataset preview:")
+        print(df[['record_id', 'src_ip', 'ttl', 'tcp_window_size', 'tcp_options_order', 'os_label', 'os_family']].head())
+
+    print(f"\nReady for training!")
 
 
 if __name__ == '__main__':

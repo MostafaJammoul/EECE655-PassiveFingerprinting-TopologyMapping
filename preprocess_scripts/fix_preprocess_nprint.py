@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
 PCAPNG to CSV Converter with Metadata Extraction
-Extracts TCP/IP features AND OS labels from pcapng packet comments
+Extracts TCP/IP features AND specific OS version labels from pcapng packet comments
 
 This script specifically handles nprint-style pcapng files where OS labels
 are embedded in packet comments as: "sampleID,os_family_os_version"
+
+Note: OS family is intentionally NOT extracted to prevent data leakage.
+Only specific OS version labels (e.g., "Ubuntu 14.4 32-bit", "Windows Vista") are extracted.
 
 Usage:
     python pcapng_to_csv_with_metadata.py input.pcapng output.csv
     python pcapng_to_csv_with_metadata.py input.pcapng output.csv --syn-only
 
 Features:
-    - Extracts OS labels from packet comments (nprint format)
+    - Extracts specific OS version labels from packet comments (nprint format)
     - Extracts TCP/IP fingerprinting features
     - Compatible with Windows, Linux, macOS
+    - NO OS family extraction (prevents data leakage)
 """
 
 import sys
@@ -299,7 +303,8 @@ def process_pcapng_with_metadata(pcap_path, syn_only=True, verbose=True):
         # Extract features
         record = {
             # Metadata
-            'record_id': f"pkt_{pkt_idx}",
+            'dataset_source': 'nprint',  # Added for merge compatibility
+            'record_id': f"nprint_{pcap_path.stem}_{pkt_idx}",  # Match nprint format
             'timestamp': float(packet.time) if hasattr(packet, 'time') else None,
             'packet_type': packet_type,
 
@@ -325,7 +330,7 @@ def process_pcapng_with_metadata(pcap_path, syn_only=True, verbose=True):
 
             # Labels (from packet comments!)
             'os_label': os_label,
-            'os_family': os_family,
+            # os_family removed to prevent data leakage - target is specific OS version only
 
             # Debug info
             'comment_raw': comment if comment else None,
@@ -368,9 +373,6 @@ def process_pcapng_with_metadata(pcap_path, syn_only=True, verbose=True):
         print(f"\nOS Label distribution:")
         print(df['os_label'].value_counts().head(10))
 
-        print(f"\nOS Family distribution:")
-        print(df['os_family'].value_counts())
-
     return df
 
 
@@ -392,8 +394,8 @@ Examples:
 
 Features extracted:
   - TCP/IP fingerprinting features (TTL, window size, MSS, options order, etc.)
-  - OS labels from packet comments (nprint format)
-  - OS family (auto-normalized to Windows/Linux/macOS/etc.)
+  - OS labels from packet comments (nprint format) - SPECIFIC OS VERSION ONLY
+  - Note: OS family intentionally omitted to prevent data leakage
         """
     )
 
@@ -449,7 +451,7 @@ Features extracted:
 
     if not args.quiet:
         print(f"\nDataset preview:")
-        print(df[['record_id', 'src_ip', 'ttl', 'tcp_window_size', 'tcp_options_order', 'os_label', 'os_family']].head())
+        print(df[['record_id', 'src_ip', 'ttl', 'tcp_window_size', 'tcp_options_order', 'os_label']].head())
 
     print(f"\nReady for training!")
 

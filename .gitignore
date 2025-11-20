@@ -34,7 +34,6 @@ env/
 
 # Data directories (large datasets)
 data/
-docs/
 *.pcap
 *.pcapng
 *.csv.gz
