@@ -12,10 +12,15 @@ Operations:
 - Delete Amazon-Linux 2
 - Merge OpenBSD 6.8, 7.0, 7.2, 7.4 → "OpenBSD 7"
 - Merge Red Hat Enterprise Linux 8.9 and 9.3 → "Red Hat Enterprise Linux 9"
+- Merge Ubuntu 20.04.6 LTS and Ubuntu 22.04.4 LTS → "Ubuntu 20/22 LTS"
+- Merge Ubuntu 16.04.6 LTS and Ubuntu 18.04.6 → "Ubuntu 16/18 LTS"
+- Merge openSUSE Leap 15.3, 15.2, 15.4 → "openSUSE Leap 15"
+- Merge Linux Mint 21.2 and 21.1 → "Linux Mint 21"
+- Merge Manjaro 22.0 and 21.0 → "Manjaro 21/22"
 - Keep all other OS versions unchanged
 
 Input:  data/processed/cesnet.csv
-Output: data/processed/cesnet_merged.csv
+Output: data/processed/iter2_cesnet.csv
 """
 
 import sys
@@ -30,7 +35,7 @@ except ImportError:
 
 
 def merge_cesnet_os_versions(input_path='data/processed/cesnet.csv',
-                              output_path='data/processed/cesnet_merged.csv'):
+                              output_path='data/processed/iter2_cesnet.csv'):
     """
     Merge and remove specific OS versions from CESNET dataset
 
@@ -119,6 +124,46 @@ def merge_cesnet_os_versions(input_path='data/processed/cesnet.csv',
     if rhel_count > 0:
         df_merged.loc[rhel_mask, 'os_label'] = 'Red Hat Enterprise Linux 9'
         merge_operations.append(f"  ✓ Merged {rhel_versions} → 'Red Hat Enterprise Linux 9' ({rhel_count:,} records)")
+
+    # 5. Merge Ubuntu 20.04.6 LTS and Ubuntu 22.04.4 LTS → "Ubuntu 20/22 LTS"
+    ubuntu_20_22_versions = ['Ubuntu 20.04.6 LTS', 'Ubuntu 22.04.4 LTS']
+    ubuntu_20_22_mask = df_merged['os_label'].isin(ubuntu_20_22_versions)
+    ubuntu_20_22_count = ubuntu_20_22_mask.sum()
+    if ubuntu_20_22_count > 0:
+        df_merged.loc[ubuntu_20_22_mask, 'os_label'] = 'Ubuntu 20/22 LTS'
+        merge_operations.append(f"  ✓ Merged {ubuntu_20_22_versions} → 'Ubuntu 20/22 LTS' ({ubuntu_20_22_count:,} records)")
+
+    # 6. Merge Ubuntu 16.04.6 LTS and Ubuntu 18.04.6 → "Ubuntu 16/18 LTS"
+    ubuntu_16_18_versions = ['Ubuntu 16.04.6 LTS', 'Ubuntu 18.04.6 LTS']
+    ubuntu_16_18_mask = df_merged['os_label'].isin(ubuntu_16_18_versions)
+    ubuntu_16_18_count = ubuntu_16_18_mask.sum()
+    if ubuntu_16_18_count > 0:
+        df_merged.loc[ubuntu_16_18_mask, 'os_label'] = 'Ubuntu 16/18 LTS'
+        merge_operations.append(f"  ✓ Merged {ubuntu_16_18_versions} → 'Ubuntu 16/18 LTS' ({ubuntu_16_18_count:,} records)")
+
+    # 7. Merge openSUSE Leap 15.3, 15.2, 15.4 → "openSUSE Leap 15"
+    opensuse_versions = ['openSUSE Leap 15.3', 'openSUSE Leap 15.2', 'openSUSE Leap 15.4']
+    opensuse_mask = df_merged['os_label'].isin(opensuse_versions)
+    opensuse_count = opensuse_mask.sum()
+    if opensuse_count > 0:
+        df_merged.loc[opensuse_mask, 'os_label'] = 'openSUSE Leap 15'
+        merge_operations.append(f"  ✓ Merged {opensuse_versions} → 'openSUSE Leap 15' ({opensuse_count:,} records)")
+
+    # 8. Merge Linux Mint 21.2 and 21.1 → "Linux Mint 21"
+    mint_versions = ['Linux Mint 21.2', 'Linux Mint 21.1']
+    mint_mask = df_merged['os_label'].isin(mint_versions)
+    mint_count = mint_mask.sum()
+    if mint_count > 0:
+        df_merged.loc[mint_mask, 'os_label'] = 'Linux Mint 21'
+        merge_operations.append(f"  ✓ Merged {mint_versions} → 'Linux Mint 21' ({mint_count:,} records)")
+
+    # 9. Merge Manjaro 22.0 and 21.0 → "Manjaro 21/22"
+    manjaro_versions = ['Manjaro 22.0', 'Manjaro 21.0']
+    manjaro_mask = df_merged['os_label'].isin(manjaro_versions)
+    manjaro_count = manjaro_mask.sum()
+    if manjaro_count > 0:
+        df_merged.loc[manjaro_mask, 'os_label'] = 'Manjaro 21/22'
+        merge_operations.append(f"  ✓ Merged {manjaro_versions} → 'Manjaro 21/22' ({manjaro_count:,} records)")
 
     # === DELETIONS ===
 
@@ -211,8 +256,8 @@ def main():
     parser.add_argument(
         '--output',
         type=str,
-        default='data/processed/cesnet_merged.csv',
-        help='Output merged CSV file (default: data/processed/cesnet_merged.csv)'
+        default='data/processed/iter2_cesnet.csv',
+        help='Output merged CSV file (default: data/processed/iter2_cesnet.csv)'
     )
 
     args = parser.parse_args()
