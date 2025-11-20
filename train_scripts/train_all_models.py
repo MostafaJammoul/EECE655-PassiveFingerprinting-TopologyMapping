@@ -55,7 +55,7 @@ def check_prerequisites(verbose=True):
     required_files = [
         os.path.join(data_dir, 'masaryk.csv'),
         os.path.join(data_dir, 'nprint.csv'),
-        os.path.join(data_dir, 'cesnet.csv'),
+        os.path.join(data_dir, 'cesnet_merged.csv'),
     ]
 
     missing = []
@@ -80,6 +80,7 @@ def check_prerequisites(verbose=True):
             print("  python preprocess_scripts/nprint_preprocess.py")
         if 'cesnet' in str(missing):
             print("  python preprocess_scripts/cesnet_preprocess.py")
+            print("  python preprocess_scripts/cesnet_merge.py")
 
         return False
 
@@ -153,7 +154,7 @@ def train_model2b(args, verbose=True):
     # Use absolute paths
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     script_path = os.path.join(base_dir, 'train_scripts', 'train_model2b_modern.py')
-    input_path = os.path.join(base_dir, 'data', 'processed', 'cesnet.csv')
+    input_path = os.path.join(base_dir, 'data', 'processed', 'cesnet_merged.csv')
 
     cmd = [
         sys.executable,
