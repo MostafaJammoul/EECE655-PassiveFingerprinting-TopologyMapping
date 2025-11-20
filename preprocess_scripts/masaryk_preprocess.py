@@ -3,7 +3,7 @@
 Preprocess Masaryk Dataset - Extract TCP SYN Flow Features for OS Family Classification
 
 Input:  data/raw/masaryk/*.csv
-Output: data/processed/masaryk_processed.csv
+Output: data/processed/masaryk.csv
 
 Extracts TCP SYN flow-level statistics for OS FAMILY classification (Windows vs Linux vs macOS).
 The Masaryk dataset provides coarse OS labels (OS families) with rich TCP fingerprinting features.
@@ -135,7 +135,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     print("MASARYK DATASET PREPROCESSING - TCP SYN FLOWS ONLY")
     print("="*70)
     print(f"\nInput:  {raw_dir}")
-    print(f"Output: {output_dir}/masaryk_processed.csv")
+    print(f"Output: {output_dir}/masaryk.csv")
     print(f"\nFILTERING: Extracting only TCP flows with SYN flag present")
     print(f"This focuses on connection establishment for better OS fingerprinting")
 
@@ -546,7 +546,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     # Save
     print(f"\n  Saving processed dataset...")
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, 'masaryk_processed.csv')
+    output_path = os.path.join(output_dir, 'masaryk.csv')
     df.to_csv(output_path, index=False)
     print(f"  Saved to: {output_path}")
 

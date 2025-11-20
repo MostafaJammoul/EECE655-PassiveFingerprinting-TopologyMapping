@@ -2,8 +2,8 @@
 """
 Preprocess CESNET Idle Dataset - Extract Packet-Level Features for OS Fingerprinting
 
-Input:  data/raw/cesnet_idle/*.pcap (organized by OS in subdirectories)
-Output: data/processed/cesnet_idle_packets.csv
+Input:  data/raw/cesnet/*.pcap (organized by OS in subdirectories)
+Output: data/processed/cesnet.csv
 
 Extracts TCP/IP fingerprinting features from SYN packets for OS version classification.
 """
@@ -455,7 +455,7 @@ def discover_pcap_files(raw_dir):
 # MAIN PIPELINE
 # ============================================================================
 
-def preprocess_cesnet_idle(raw_dir='data/raw/cesnet_idle',
+def preprocess_cesnet_idle(raw_dir='data/raw/cesnet',
                            output_dir='data/processed',
                            max_files=None,
                            verbose=True,
@@ -478,7 +478,7 @@ def preprocess_cesnet_idle(raw_dir='data/raw/cesnet_idle',
     print("CESNET IDLE DATASET PREPROCESSING")
     print("="*70)
     print(f"\nInput:  {raw_dir}")
-    print(f"Output: {output_dir}/cesnet_idle_packets.csv")
+    print(f"Output: {output_dir}/cesnet.csv")
     print(f"Mode:   {'SYN packets only' if syn_only else 'ALL TCP packets'}")
 
     # Discover PCAP files
@@ -488,7 +488,7 @@ def preprocess_cesnet_idle(raw_dir='data/raw/cesnet_idle',
     if not pcap_files:
         print(f"\nERROR: No PCAP files found in {raw_dir}")
         print("\nExpected structure (supports nested directories):")
-        print("  data/raw/cesnet_idle/")
+        print("  data/raw/cesnet/")
         print("  ├── android__android-x86__9.0/")
         print("  │   └── 2025-02-04__osboxes.org__*/")
         print("  │       └── traffic.pcap")
@@ -540,7 +540,7 @@ def preprocess_cesnet_idle(raw_dir='data/raw/cesnet_idle',
 
     print(f"\n[3/3] Saving processed dataset...")
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, 'cesnet_idle_packets.csv')
+    output_path = os.path.join(output_dir, 'cesnet.csv')
     df.to_csv(output_path, index=False)
     print(f"  Saved to: {output_path}")
 
@@ -578,7 +578,7 @@ def main():
     parser.add_argument(
         '--input',
         type=str,
-        default='data/raw/cesnet_idle',
+        default='data/raw/cesnet',
         help='Input directory with PCAP files'
     )
 

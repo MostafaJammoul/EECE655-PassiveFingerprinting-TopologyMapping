@@ -48,10 +48,14 @@ def run_command(cmd, description, verbose=True):
 def check_prerequisites(verbose=True):
     """Check if preprocessed data exists"""
 
+    # Use absolute paths for dataset files
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(base_dir, 'data', 'processed')
+
     required_files = [
-        'data/processed/masaryk_processed.csv',
-        'data/processed/nprint_packets.csv',
-        'data/processed/cesnet_idle_packets.csv',
+        os.path.join(data_dir, 'masaryk.csv'),
+        os.path.join(data_dir, 'nprint.csv'),
+        os.path.join(data_dir, 'cesnet.csv'),
     ]
 
     missing = []
@@ -68,14 +72,14 @@ def check_prerequisites(verbose=True):
             print(f"  - {file}")
 
         print("\nPlease run preprocessing first:")
-        print("  python scripts/preprocess_all.py")
+        print("  python preprocess_scripts/preprocess_all.py")
         print("\nOr run individual preprocessing scripts:")
         if 'masaryk' in str(missing):
-            print("  python scripts/preprocess_masaryk.py")
+            print("  python preprocess_scripts/masaryk_preprocess.py")
         if 'nprint' in str(missing):
-            print("  python scripts/preprocess_nprint.py")
+            print("  python preprocess_scripts/nprint_preprocess.py")
         if 'cesnet' in str(missing):
-            print("  python scripts/preprocess_cesnet_idle.py")
+            print("  python preprocess_scripts/cesnet_preprocess.py")
 
         return False
 
@@ -88,10 +92,15 @@ def check_prerequisites(verbose=True):
 def train_model1(args, verbose=True):
     """Train Model 1: OS Family Classifier"""
 
+    # Use absolute paths
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script_path = os.path.join(base_dir, 'train_scripts', 'train_model1_family.py')
+    input_path = os.path.join(base_dir, 'data', 'processed', 'masaryk.csv')
+
     cmd = [
         sys.executable,
-        'scripts/train_model1_family.py',
-        '--input', 'data/processed/masaryk_processed.csv',
+        script_path,
+        '--input', input_path,
         '--output-dir', args.output_dir,
         '--results-dir', args.results_dir,
     ]
@@ -109,10 +118,15 @@ def train_model1(args, verbose=True):
 def train_model2a(args, verbose=True):
     """Train Model 2a: Legacy OS Classifier"""
 
+    # Use absolute paths
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script_path = os.path.join(base_dir, 'train_scripts', 'train_model2a_legacy.py')
+    input_path = os.path.join(base_dir, 'data', 'processed', 'nprint.csv')
+
     cmd = [
         sys.executable,
-        'scripts/train_model2a_legacy.py',
-        '--input', 'data/processed/nprint_packets.csv',
+        script_path,
+        '--input', input_path,
         '--output-dir', args.output_dir,
         '--results-dir', args.results_dir,
     ]
@@ -136,10 +150,15 @@ def train_model2a(args, verbose=True):
 def train_model2b(args, verbose=True):
     """Train Model 2b: Modern OS Classifier"""
 
+    # Use absolute paths
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script_path = os.path.join(base_dir, 'train_scripts', 'train_model2b_modern.py')
+    input_path = os.path.join(base_dir, 'data', 'processed', 'cesnet.csv')
+
     cmd = [
         sys.executable,
-        'scripts/train_model2b_modern.py',
-        '--input', 'data/processed/cesnet_idle_packets.csv',
+        script_path,
+        '--input', input_path,
         '--output-dir', args.output_dir,
         '--results-dir', args.results_dir,
     ]
@@ -234,7 +253,7 @@ Examples:
     parser.add_argument(
         '--recommended',
         action='store_true',
-        help='Use all recommended settings for best accuracy (SMOTE + class merging + ADASYN + CV)'
+        help='Use all recommended settings: SMOTE (Model 2a) + ADASYN (Model 2b) + class merging (Model 2b) + cross-validation (Model 2b). WARNING: --merge-classes defeats fine-grained version classification!'
     )
 
     parser.add_argument(
@@ -275,7 +294,7 @@ Examples:
     parser.add_argument(
         '--merge-classes',
         action='store_true',
-        help='Merge similar OS classes in Model 2b (HIGHLY RECOMMENDED)'
+        help='Merge similar OS classes in Model 2b (WARNING: defeats fine-grained version classification!)'
     )
 
     parser.add_argument(

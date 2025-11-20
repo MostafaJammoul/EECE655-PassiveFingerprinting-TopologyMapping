@@ -15,22 +15,27 @@ tqdm>=4.65.0
 # ==============================================================================
 # Machine Learning / AI Dependencies
 # ==============================================================================
-# TODO: Add ML/AI libraries once model architecture is finalized
-#
-# Suggested packages to add later:
-# - scikit-learn>=1.3.0          # Traditional ML algorithms
-# - tensorflow>=2.13.0           # Deep learning (if using TensorFlow)
-# - torch>=2.0.0                 # Deep learning (if using PyTorch)
-# - xgboost>=1.7.0              # Gradient boosting
-# - lightgbm>=4.0.0             # Gradient boosting
-# - imbalanced-learn>=0.11.0    # Handling class imbalance
-# - optuna>=3.3.0               # Hyperparameter optimization
+
+# Core ML libraries
+scikit-learn>=1.3.0           # Traditional ML algorithms, train/test split, metrics
+xgboost>=1.7.0                # Gradient boosting (used for all three models)
+
+# Class imbalance handling
+imbalanced-learn>=0.11.0      # SMOTE, ADASYN for handling imbalanced datasets
+
+# Optional: Advanced ML libraries (uncomment if needed)
+# tensorflow>=2.13.0           # Deep learning (if using TensorFlow)
+# torch>=2.0.0                 # Deep learning (if using PyTorch)
+# lightgbm>=4.0.0             # Gradient boosting alternative
+# optuna>=3.3.0               # Hyperparameter optimization
 
 # ==============================================================================
-# Visualization (Optional)
+# Visualization (Required for training scripts)
 # ==============================================================================
-# matplotlib>=3.7.0
-# seaborn>=0.12.0
+matplotlib>=3.7.0              # Plotting confusion matrices, feature importance
+seaborn>=0.12.0                # Statistical data visualization
+
+# Optional: Interactive plotting
 # plotly>=5.15.0
 
 # ==============================================================================
