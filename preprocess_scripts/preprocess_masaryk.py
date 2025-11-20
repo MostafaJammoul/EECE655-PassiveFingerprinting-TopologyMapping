@@ -53,6 +53,25 @@ def extract_os_family(os_label):
 # FEATURE ENGINEERING
 # ============================================================================
 
+def calculate_initial_ttl(ttl):
+    """
+    Estimate original TTL value based on observed TTL
+
+    Common initial TTLs:
+    - 64:  Linux, macOS, Unix
+    - 128: Windows
+    - 255: Cisco, Solaris
+    - 32:  Old systems
+    """
+    if ttl is None:
+        return None
+    common_ttls = [32, 64, 128, 255]
+    for initial in common_ttls:
+        if ttl <= initial:
+            return initial
+    return 255
+
+
 def calculate_flow_features(row):
     """
     Calculate additional flow-level features from raw flow data
@@ -66,6 +85,14 @@ def calculate_flow_features(row):
     def get_num(key):
         val = row.get(key)
         return val if val is not None else 0
+
+    # Initial TTL estimation (from max_ttl_forward if available, else from ttl)
+    max_ttl_fwd = row.get('max_ttl_forward')
+    if max_ttl_fwd:
+        features['initial_ttl'] = calculate_initial_ttl(max_ttl_fwd)
+    else:
+        ttl = row.get('ttl')
+        features['initial_ttl'] = calculate_initial_ttl(ttl) if ttl else None
 
     # Packet rate (packets per second)
     flow_duration = row.get('flow_duration')
@@ -102,6 +129,9 @@ def calculate_flow_features(row):
         features['ul_dl_ratio'] = bytes_sent / bytes_received
     else:
         features['ul_dl_ratio'] = None
+
+    # Total bytes (for easier access)
+    features['total_bytes'] = get_num('bytes_sent') + get_num('bytes_received')
 
     return features
 
@@ -373,6 +403,105 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                     except (ValueError, TypeError):
                         pass
 
+                    # Extract IP ToS (position 21) - MEDIUM importance
+                    ip_tos = None
+                    try:
+                        if len(fields) > 21 and fields[21]:
+                            ip_tos = int(fields[21])
+                    except (ValueError, TypeError):
+                        pass
+
+                    # Extract bidirectional features (positions 87-106) - CRITICAL for OS fingerprinting!
+                    # These are the features your script was already documenting but NOT extracting!
+
+                    # TTL features (HIGH importance)
+                    max_ttl_forward = None
+                    max_ttl_backward = None
+                    try:
+                        if len(fields) > 87 and fields[87]:
+                            max_ttl_forward = int(fields[87])
+                        if len(fields) > 88 and fields[88]:
+                            max_ttl_backward = int(fields[88])
+                    except (ValueError, TypeError):
+                        pass
+
+                    # Don't Fragment flags (HIGH importance)
+                    df_flag_forward = None
+                    df_flag_backward = None
+                    try:
+                        if len(fields) > 89 and fields[89]:
+                            df_flag_forward = int(fields[89])
+                        if len(fields) > 90 and fields[90]:
+                            df_flag_backward = int(fields[90])
+                    except (ValueError, TypeError):
+                        pass
+
+                    # TCP Timestamps (CRITICAL!)
+                    tcp_timestamp_forward = None
+                    tcp_timestamp_backward = None
+                    try:
+                        if len(fields) > 91 and fields[91]:
+                            tcp_timestamp_forward = int(fields[91])
+                        if len(fields) > 92 and fields[92]:
+                            tcp_timestamp_backward = int(fields[92])
+                    except (ValueError, TypeError):
+                        pass
+
+                    # TCP Window Scale (HIGH importance)
+                    tcp_win_scale_forward = None
+                    tcp_win_scale_backward = None
+                    try:
+                        if len(fields) > 93 and fields[93]:
+                            tcp_win_scale_forward = int(fields[93])
+                        if len(fields) > 94 and fields[94]:
+                            tcp_win_scale_backward = int(fields[94])
+                    except (ValueError, TypeError):
+                        pass
+
+                    # TCP SACK Permitted (MEDIUM importance)
+                    tcp_sack_permitted_forward = None
+                    tcp_sack_permitted_backward = None
+                    try:
+                        if len(fields) > 95 and fields[95]:
+                            tcp_sack_permitted_forward = int(fields[95])
+                        if len(fields) > 96 and fields[96]:
+                            tcp_sack_permitted_backward = int(fields[96])
+                    except (ValueError, TypeError):
+                        pass
+
+                    # TCP MSS (HIGH importance)
+                    tcp_mss_forward = None
+                    tcp_mss_backward = None
+                    try:
+                        if len(fields) > 97 and fields[97]:
+                            tcp_mss_forward = int(fields[97])
+                        if len(fields) > 98 and fields[98]:
+                            tcp_mss_backward = int(fields[98])
+                    except (ValueError, TypeError):
+                        pass
+
+                    # TCP NOP (LOW importance, but easy)
+                    tcp_nop_forward = None
+                    tcp_nop_backward = None
+                    try:
+                        if len(fields) > 99 and fields[99]:
+                            tcp_nop_forward = int(fields[99])
+                        if len(fields) > 100 and fields[100]:
+                            tcp_nop_backward = int(fields[100])
+                    except (ValueError, TypeError):
+                        pass
+
+                    # Packet counts bidirectional (for context)
+                    pkt_count_forward = None
+                    pkt_count_backward = None
+                    try:
+                        if len(fields) > 101 and fields[101]:
+                            pkt_count_forward = int(fields[101])
+                        if len(fields) > 102 and fields[102]:
+                            pkt_count_backward = int(fields[102])
+                    except (ValueError, TypeError):
+                        pass
+
                     record = {
                         # Metadata
                         'dataset_source': 'masaryk',
@@ -381,7 +510,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                         # Flow-level features
                         'pkt_count': pkt_count,
                         'flow_duration': flow_duration,
-                        'bytes_sent': total_bytes if total_bytes else None,  # Using total as "sent" estimate
+                        'bytes_sent': total_bytes if total_bytes else None,
                         'bytes_received': None,  # Not available in this format
 
                         # Network info
@@ -390,9 +519,30 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                         'protocol': protocol,
                         'ttl': ttl,
 
-                        # TCP fingerprinting features (from SYN flows)
-                        'tcp_win_size': tcp_win_size,
-                        'tcp_syn_size': tcp_syn_size,
+                        # IP-level features (ENHANCED!)
+                        'ip_tos': ip_tos,  # NEW: MEDIUM importance
+                        'max_ttl_forward': max_ttl_forward,  # NEW: HIGH importance
+                        'max_ttl_backward': max_ttl_backward,  # NEW: HIGH importance
+                        'df_flag_forward': df_flag_forward,  # NEW: HIGH importance
+                        'df_flag_backward': df_flag_backward,  # NEW: HIGH importance
+
+                        # TCP fingerprinting features (MASSIVELY ENHANCED!)
+                        'tcp_win_size': tcp_win_size,  # Original
+                        'tcp_syn_size': tcp_syn_size,  # Original
+                        'tcp_timestamp_forward': tcp_timestamp_forward,  # NEW: CRITICAL!
+                        'tcp_timestamp_backward': tcp_timestamp_backward,  # NEW: CRITICAL!
+                        'tcp_win_scale_forward': tcp_win_scale_forward,  # NEW: HIGH importance
+                        'tcp_win_scale_backward': tcp_win_scale_backward,  # NEW: HIGH importance
+                        'tcp_sack_permitted_forward': tcp_sack_permitted_forward,  # NEW: MEDIUM
+                        'tcp_sack_permitted_backward': tcp_sack_permitted_backward,  # NEW: MEDIUM
+                        'tcp_mss_forward': tcp_mss_forward,  # NEW: HIGH importance
+                        'tcp_mss_backward': tcp_mss_backward,  # NEW: HIGH importance
+                        'tcp_nop_forward': tcp_nop_forward,  # NEW: LOW but easy
+                        'tcp_nop_backward': tcp_nop_backward,  # NEW: LOW but easy
+
+                        # Flow packet counts (bidirectional context)
+                        'pkt_count_forward': pkt_count_forward,  # NEW
+                        'pkt_count_backward': pkt_count_backward,  # NEW
 
                         # Labels
                         'os_label': full_os_label,
@@ -472,11 +622,20 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     if available_flow_features:
         print(df[available_flow_features].describe())
 
-    print(f"\nTCP fingerprinting features (if available):")
-    tcp_features = ['tcp_win_size', 'tcp_syn_size', 'ttl']
-    available_tcp_features = [f for f in tcp_features if f in df.columns]
-    if available_tcp_features:
-        print(df[available_tcp_features].describe())
+    print(f"\nTCP/IP fingerprinting features completeness:")
+    fingerprint_features = [
+        'tcp_win_size', 'tcp_syn_size', 'ttl',
+        'tcp_timestamp_forward', 'tcp_timestamp_backward',
+        'tcp_win_scale_forward', 'tcp_win_scale_backward',
+        'tcp_mss_forward', 'tcp_mss_backward',
+        'df_flag_forward', 'df_flag_backward',
+        'ip_tos', 'initial_ttl'
+    ]
+    for feat in fingerprint_features:
+        if feat in df.columns:
+            pct_available = (df[feat].notna().sum() / len(df)) * 100
+            status = "✓" if pct_available > 80 else "⚠"
+            print(f"  {status} {feat:<30}: {pct_available:>5.1f}%")
 
     return df
 

@@ -81,6 +81,51 @@ def extract_tcp_window_scale(tcp_packet):
     return None
 
 
+def extract_tcp_timestamp(tcp_packet):
+    """
+    Extract TCP Timestamp option (CRITICAL for OS fingerprinting!)
+
+    Returns:
+        (TSval, TSecr) tuple or (None, None) if not present
+
+    Different OSes use different timestamp granularities:
+    - Linux: ~1ms (HZ=1000)
+    - Windows: ~100ms
+    - macOS: ~10ms
+    """
+    if not hasattr(tcp_packet, 'options'):
+        return None, None
+
+    for opt in tcp_packet.options:
+        if isinstance(opt, tuple) and len(opt) >= 2:
+            if opt[0] == 'Timestamp':
+                # opt[1] is a tuple of (TSval, TSecr)
+                if isinstance(opt[1], tuple) and len(opt[1]) >= 2:
+                    return opt[1][0], opt[1][1]
+                elif isinstance(opt[1], (list, tuple)) and len(opt[1]) >= 1:
+                    ts_val = opt[1][0] if len(opt[1]) > 0 else None
+                    ts_ecr = opt[1][1] if len(opt[1]) > 1 else None
+                    return ts_val, ts_ecr
+    return None, None
+
+
+def extract_tcp_sack_permitted(tcp_packet):
+    """
+    Check if SACK (Selective Acknowledgment) is permitted
+
+    Modern feature - adoption varies by OS
+    """
+    if not hasattr(tcp_packet, 'options'):
+        return 0
+
+    for opt in tcp_packet.options:
+        if isinstance(opt, tuple) and opt[0] == 'SAckOK':
+            return 1
+        elif isinstance(opt, str) and opt == 'SAckOK':
+            return 1
+    return 0
+
+
 def calculate_initial_ttl(ttl):
     """
     Estimate the original TTL value based on observed TTL
@@ -185,15 +230,18 @@ def process_pcap_file(pcap_path, os_label, verbose=False, syn_only=True):
         if is_psh: packet_type.append('PSH')
         packet_type_str = '+'.join(packet_type) if packet_type else 'NONE'
 
+        # Extract TCP timestamp
+        tcp_ts_val, tcp_ts_ecr = extract_tcp_timestamp(tcp_layer)
+
         # Extract features
         record = {
             # Metadata
             'dataset_source': 'cesnet_idle',
             'record_id': f"cesnet_idle_{pcap_path.stem}_pkt{pkt_idx}",
             'timestamp': float(packet.time) if hasattr(packet, 'time') else None,
-            'packet_type': packet_type_str,  # NEW: Track packet type
+            'packet_type': packet_type_str,
 
-            # IP layer
+            # IP layer (ENHANCED with critical features!)
             'src_ip': ip_layer.src,
             'dst_ip': ip_layer.dst,
             'protocol': ip_layer.proto,
@@ -201,17 +249,23 @@ def process_pcap_file(pcap_path, os_label, verbose=False, syn_only=True):
             'initial_ttl': calculate_initial_ttl(ip_layer.ttl),
             'df_flag': 1 if (ip_layer.flags & 0x2) else 0,  # Don't Fragment
             'ip_len': ip_layer.len if hasattr(ip_layer, 'len') else len(packet),
+            'ip_id': ip_layer.id if hasattr(ip_layer, 'id') else None,  # CRITICAL: Windows incremental, Linux random
+            'ip_tos': ip_layer.tos if hasattr(ip_layer, 'tos') else None,  # MEDIUM: Some OSes set distinctive values
 
             # TCP layer
             'src_port': tcp_layer.sport,
             'dst_port': tcp_layer.dport,
             'tcp_window_size': tcp_layer.window,
             'tcp_flags': int(tcp_layer.flags),
+            'tcp_urgent_ptr': tcp_layer.urgptr if hasattr(tcp_layer, 'urgptr') else None,  # LOW but easy
 
-            # TCP options (critical for fingerprinting!)
+            # TCP options (CRITICAL for fingerprinting!)
             'tcp_mss': extract_tcp_mss(tcp_layer),
             'tcp_window_scale': extract_tcp_window_scale(tcp_layer),
             'tcp_options_order': extract_tcp_options_order(tcp_layer),
+            'tcp_timestamp_val': tcp_ts_val,  # CRITICAL: Timestamp value
+            'tcp_timestamp_ecr': tcp_ts_ecr,  # CRITICAL: Timestamp echo reply
+            'tcp_sack_permitted': extract_tcp_sack_permitted(tcp_layer),  # MEDIUM: Explicit SACK flag
 
             # Labels
             'os_label': os_label,
@@ -499,10 +553,12 @@ def preprocess_cesnet_idle(raw_dir='data/raw/cesnet_idle',
     print(df['os_label'].value_counts().head(10))
 
     print(f"\nFeature completeness:")
-    critical_features = ['ttl', 'tcp_window_size', 'tcp_mss', 'tcp_options_order']
+    critical_features = ['ttl', 'tcp_window_size', 'tcp_mss', 'tcp_options_order',
+                        'tcp_timestamp_val', 'ip_id', 'ip_tos']
     for feat in critical_features:
         pct_available = (df[feat].notna().sum() / len(df)) * 100
-        print(f"  {feat}: {pct_available:.1f}%")
+        status = "✓" if pct_available > 80 else "⚠"
+        print(f"  {status} {feat}: {pct_available:.1f}%")
 
     return df
 

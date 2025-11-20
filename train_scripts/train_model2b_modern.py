@@ -144,21 +144,27 @@ def select_features(df, verbose=True):
     CESNET dataset has rich packet-level features
     """
 
-    # TCP fingerprinting features
+    # TCP fingerprinting features (ENHANCED for modern OS detection!)
     tcp_features = [
         'tcp_window_size',
-        'tcp_window_scale',
-        'tcp_mss',
-        'tcp_options_order',  # String - needs encoding
+        'tcp_window_scale',  # Window scale option
+        'tcp_mss',  # Maximum Segment Size
+        'tcp_options_order',  # CRITICAL: String - needs encoding
         'tcp_flags',
+        'tcp_timestamp_val',  # NEW: CRITICAL! Timestamp value
+        'tcp_timestamp_ecr',  # NEW: CRITICAL! Timestamp echo reply
+        'tcp_sack_permitted',  # NEW: MEDIUM importance
+        'tcp_urgent_ptr',  # NEW: LOW importance
     ]
 
-    # IP features
+    # IP features (ENHANCED with critical discriminators!)
     ip_features = [
         'ttl',
-        'initial_ttl',
-        'df_flag',
-        'ip_len',
+        'initial_ttl',  # Estimated initial TTL
+        'df_flag',  # Don't Fragment
+        'ip_len',  # IP packet length
+        'ip_id',  # NEW: CRITICAL! Windows=incremental, Linux=randomized
+        'ip_tos',  # NEW: MEDIUM - Type of Service / DSCP
     ]
 
     # Network

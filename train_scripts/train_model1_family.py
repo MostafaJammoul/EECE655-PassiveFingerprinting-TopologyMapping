@@ -53,32 +53,34 @@ def select_features(df, verbose=True):
     for OS family fingerprinting.
     """
 
-    # Core TCP fingerprinting features (packet-level)
+    # Core TCP fingerprinting features (CRITICAL for OS identification!)
     tcp_features = [
+        # Basic TCP features
         'tcp_syn_size',
-        'tcp_window_size',
-        'tcp_syn_ttl',
-        'tcp_window_scale_forward',
-        'tcp_window_scale_backward',
-        'tcp_mss_forward',
-        'tcp_mss_backward',
-        'tcp_sack_permitted_forward',
-        'tcp_sack_permitted_backward',
-        'tcp_timestamp_forward',
-        'tcp_timestamp_backward',
-        'tcp_nop_forward',
-        'tcp_nop_backward',
+        'tcp_win_size',  # Added alias for tcp_window_size
+
+        # TCP Options (CRITICAL - Different OSes have unique patterns)
+        'tcp_win_scale_forward',  # NEW: HIGH importance
+        'tcp_win_scale_backward',  # NEW: HIGH importance
+        'tcp_mss_forward',  # NEW: HIGH importance
+        'tcp_mss_backward',  # NEW: HIGH importance
+        'tcp_sack_permitted_forward',  # NEW: MEDIUM importance
+        'tcp_sack_permitted_backward',  # NEW: MEDIUM importance
+        'tcp_timestamp_forward',  # NEW: CRITICAL! Timestamp granularity differs by OS
+        'tcp_timestamp_backward',  # NEW: CRITICAL!
+        'tcp_nop_forward',  # NEW: LOW importance
+        'tcp_nop_backward',  # NEW: LOW importance
     ]
 
-    # IP-level features
+    # IP-level features (ENHANCED with critical discriminators)
     ip_features = [
-        'ttl',
-        'initial_ttl',
-        'df_flag_forward',
-        'df_flag_backward',
-        'ip_tos',
-        'max_ttl_forward',
-        'max_ttl_backward',
+        'ttl',  # Time to Live
+        'initial_ttl',  # NEW: Estimated initial TTL (64=Linux/Mac, 128=Windows)
+        'df_flag_forward',  # NEW: Don't Fragment flag forward
+        'df_flag_backward',  # NEW: Don't Fragment flag backward
+        'ip_tos',  # NEW: MEDIUM importance - Type of Service
+        'max_ttl_forward',  # NEW: Maximum TTL observed forward
+        'max_ttl_backward',  # NEW: Maximum TTL observed backward
     ]
 
     # Flow-level behavioral features

@@ -53,21 +53,27 @@ def select_features(df, verbose=True):
     nPrint dataset provides rich packet-level TCP/IP features
     """
 
-    # TCP/IP fingerprinting features (most discriminative)
+    # TCP/IP fingerprinting features (ENHANCED - most discriminative for OS fingerprinting!)
     tcp_features = [
         'tcp_window_size',
-        'tcp_window_scale',
-        'tcp_mss',
-        'tcp_options_order',  # String feature - needs encoding
+        'tcp_window_scale',  # Window scale option
+        'tcp_mss',  # Maximum Segment Size
+        'tcp_options_order',  # CRITICAL: String feature - needs encoding
         'tcp_flags',
+        'tcp_timestamp_val',  # NEW: CRITICAL! Timestamp value (granularity differs by OS)
+        'tcp_timestamp_ecr',  # NEW: CRITICAL! Timestamp echo reply
+        'tcp_sack_permitted',  # NEW: MEDIUM importance
+        'tcp_urgent_ptr',  # NEW: LOW importance
     ]
 
-    # IP-level features
+    # IP-level features (ENHANCED with critical discriminators!)
     ip_features = [
         'ttl',
         'initial_ttl',
-        'df_flag',
-        'ip_len',
+        'df_flag',  # Don't Fragment
+        'ip_len',  # IP packet length
+        'ip_id',  # NEW: CRITICAL! Windows=incremental, Linux=randomized
+        'ip_tos',  # NEW: MEDIUM - Type of Service / DSCP
     ]
 
     # Network metadata (may help)
