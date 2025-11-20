@@ -143,10 +143,11 @@ def handle_missing_values(X, strategy='median', verbose=True):
         print(f"\nMissing Values:")
         print(f"  Total missing: {missing_before:,}")
 
+    # Only apply median/mean to numeric columns
     if strategy == 'median':
-        X_filled = X.fillna(X.median())
+        X_filled = X.fillna(X.select_dtypes(include=['number']).median())
     elif strategy == 'mean':
-        X_filled = X.fillna(X.mean())
+        X_filled = X.fillna(X.select_dtypes(include=['number']).mean())
     elif strategy == 'zero':
         X_filled = X.fillna(0)
     else:
@@ -551,6 +552,11 @@ def main():
 
     # Select features
     feature_columns = select_features(df, verbose=verbose)
+
+    # Remove string column (tcp_options_order) - it's already encoded as binary features
+    if 'tcp_options_order' in feature_columns:
+        feature_columns.remove('tcp_options_order')
+
     feature_columns.extend(tcp_opt_cols)  # Add encoded TCP option features
 
     if len(feature_columns) == 0:

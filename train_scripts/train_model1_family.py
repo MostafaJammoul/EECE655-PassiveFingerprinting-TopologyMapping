@@ -134,10 +134,11 @@ def handle_missing_values(X, strategy='median', verbose=True):
         print(f"\nMissing Values:")
         print(f"  Total missing: {missing_before:,}")
 
+    # Only apply median/mean to numeric columns
     if strategy == 'median':
-        X_filled = X.fillna(X.median())
+        X_filled = X.fillna(X.select_dtypes(include=['number']).median())
     elif strategy == 'mean':
-        X_filled = X.fillna(X.mean())
+        X_filled = X.fillna(X.select_dtypes(include=['number']).mean())
     elif strategy == 'zero':
         X_filled = X.fillna(0)
     else:

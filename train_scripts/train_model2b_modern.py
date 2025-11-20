@@ -220,10 +220,11 @@ def handle_missing_values(X, strategy='median', verbose=True):
         missing_before = X.isnull().sum().sum()
         print(f"\nMissing Values: {missing_before:,}")
 
+    # Only apply median/mean to numeric columns
     if strategy == 'median':
-        X_filled = X.fillna(X.median())
+        X_filled = X.fillna(X.select_dtypes(include=['number']).median())
     elif strategy == 'mean':
-        X_filled = X.fillna(X.mean())
+        X_filled = X.fillna(X.select_dtypes(include=['number']).mean())
     else:
         X_filled = X.fillna(0)
 
@@ -622,6 +623,11 @@ def main():
 
     df, tcp_opt_cols = encode_tcp_options(df, max_patterns=15, verbose=verbose)
     feature_columns = select_features(df, verbose=verbose)
+
+    # Remove string column (tcp_options_order) - it's already encoded as binary features
+    if 'tcp_options_order' in feature_columns:
+        feature_columns.remove('tcp_options_order')
+
     feature_columns.extend(tcp_opt_cols)
 
     X = df[feature_columns].copy()
