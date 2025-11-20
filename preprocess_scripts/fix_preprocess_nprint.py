@@ -67,16 +67,21 @@ def parse_os_label_from_comment(comment):
         return None, None
 
     # Second part is "easylabel_hardlabel"
-    label_part = parts[1]
+    label_part = parts[1].strip().strip("'\"")
 
     # Split by underscore
     label_parts = label_part.split('_', 1)
     if len(label_parts) < 2:
         # Sometimes there's only one part
-        return None, label_parts[0]
+        single_label = label_parts[0].strip().strip("'\"")
+        return None, single_label
 
     os_family = label_parts[0]
     os_version = label_parts[1]
+    
+    # Strip any trailing/leading apostrophes and whitespace
+    os_family = os_family.strip().strip("'\"")
+    os_version = os_version.strip().strip("'\"")
 
     return os_family, os_version
 
@@ -121,7 +126,7 @@ def normalize_os_version(os_version_raw):
     if not os_version_raw:
         return 'Unknown'
 
-    version = str(os_version_raw).strip()
+    version = str(os_version_raw).strip().strip("'\"")  # Remove apostrophes and quotes
 
     # Replace hyphens and underscores with spaces
     version = version.replace('-', ' ').replace('_', ' ')
