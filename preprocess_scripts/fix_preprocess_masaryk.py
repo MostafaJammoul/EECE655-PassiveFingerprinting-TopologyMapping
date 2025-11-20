@@ -26,6 +26,30 @@ except ImportError:
 
 
 # ============================================================================
+# OS FAMILY EXTRACTION
+# ============================================================================
+
+def extract_os_family(os_label):
+    """Extract OS family from detailed OS label"""
+    os_lower = str(os_label).lower()
+
+    if any(w in os_lower for w in ['windows', 'win10', 'win11', 'win7', 'win8', 'microsoft']):
+        return 'Windows'
+    elif any(w in os_lower for w in ['ubuntu', 'debian', 'fedora', 'centos', 'linux', 'kali', 'mint', 'arch', 'redhat']):
+        return 'Linux'
+    elif any(w in os_lower for w in ['macos', 'darwin', 'osx', 'mac']):
+        return 'macOS'
+    elif 'android' in os_lower:
+        return 'Android'
+    elif any(w in os_lower for w in ['ios', 'iphone', 'ipad']):
+        return 'iOS'
+    elif 'bsd' in os_lower:
+        return 'BSD'
+    else:
+        return 'Other'
+
+
+# ============================================================================
 # FEATURE ENGINEERING
 # ============================================================================
 
@@ -241,6 +265,8 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                         full_os_label = f"{os_label} {os_version}"
                     else:
                         full_os_label = os_label
+
+                    os_family = extract_os_family(os_label)
 
                     # Calculate flow duration from timestamps
                     flow_duration = None
@@ -482,8 +508,8 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                         'pkt_count_forward': pkt_count_forward,  # NEW
                         'pkt_count_backward': pkt_count_backward,  # NEW
 
-                        # Labels (os_family removed to prevent data leakage - target is specific OS version only)
-                        'os_label': full_os_label,
+                        # Labels
+                        'os_family': os_family,  # Primary target for family classification
                     }
 
                     # Calculate derived features
@@ -545,9 +571,9 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
         print("  Check the input data format and error messages above.")
         return df
 
-    print(f"\nOS Label distribution (top 10):")
-    if 'os_label' in df.columns:
-        print(df['os_label'].value_counts().head(10))
+    print(f"\nOS Family distribution:")
+    if 'os_family' in df.columns:
+        print(df['os_family'].value_counts())
 
     print(f"\nTCP/IP fingerprinting features completeness:")
     fingerprint_features = [
@@ -624,14 +650,14 @@ def main():
     if df is None:
         sys.exit(1)
 
-    print("\n✓ Success! Dataset ready for training.")
-    print(f"\nThis dataset contains TCP SYN FLOW-level features with OS version labels:")
+    print("\n✓ Success! Dataset ready for Model 1 (family classification) training.")
+    print(f"\nThis dataset contains TCP SYN FLOW-level features with OS FAMILY labels:")
     print(f"  - FILTERED: Only TCP flows with SYN flag present")
     print(f"  - Enhanced TCP/IP fingerprinting features (17 new bidirectional features!)")
-    print(f"  - CRITICAL features: TCP timestamps, IP ID, IP ToS, bidirectional TCP options")
+    print(f"  - CRITICAL features: TCP timestamps, IP ToS, bidirectional TCP options")
     print(f"  - Flow statistics (packet counts, duration, byte rates)")
-    print(f"  - Use this for predicting specific OS versions")
-    print(f"  - NOTE: os_family intentionally excluded to prevent data leakage")
+    print(f"  - Use this for predicting OS FAMILY (Windows/Linux/macOS/iOS/Android)")
+    print(f"  - Masaryk provides rich TCP/IP features from connection establishment!")
 
 
 if __name__ == '__main__':
