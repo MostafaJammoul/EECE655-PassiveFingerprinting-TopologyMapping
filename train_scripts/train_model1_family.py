@@ -103,14 +103,8 @@ def select_features(df, verbose=True):
         'dst_port',
     ]
 
-    # NPM timing features
-    npm_features = [
-        'npm_round_trip_time',
-        'npm_tcp_retransmission_a',
-        'npm_tcp_retransmission_b',
-        'npm_tcp_out_of_order_a',
-        'npm_tcp_out_of_order_b',
-    ]
+    # NPM timing features - REMOVED (not available in CESNET, not needed for deployment)
+    # npm_features = []
 
     # TLS fingerprinting features (string features - require encoding)
     tls_features = [
@@ -123,8 +117,8 @@ def select_features(df, verbose=True):
         'tls_ja3_fingerprint',
     ]
 
-    # Combine all features
-    all_features = tcp_features + ip_features + flow_features + port_features + npm_features + tls_features
+    # Combine all features (NPM features excluded - not available in CESNET)
+    all_features = tcp_features + ip_features + flow_features + port_features + tls_features
 
     # Select only features that exist in the dataframe
     available_features = [f for f in all_features if f in df.columns]
@@ -488,13 +482,23 @@ def main():
     args = parser.parse_args()
     verbose = not args.quiet
 
+    # Create dated folder name for this training run
+    from datetime import datetime
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    dated_folder = f"FamilyClassifier_{date_str}"
+
+    # Update output directories to use dated folders
+    args.output_dir = os.path.join(args.output_dir, dated_folder)
+    args.results_dir = os.path.join(args.results_dir, dated_folder)
+
     # Print header
     if verbose:
         print("="*70)
         print("MODEL 1: OS FAMILY CLASSIFIER (MASARYK DATASET)")
         print("="*70)
         print(f"\nInput:  {args.input}")
-        print(f"Output: {args.output_dir}/model1_os_family.pkl")
+        print(f"Output: {args.output_dir}/")
+        print(f"Results: {args.results_dir}/")
         print(f"Algorithm: XGBoost")
         if args.use_adasyn:
             print(f"Oversampling: ADASYN")
