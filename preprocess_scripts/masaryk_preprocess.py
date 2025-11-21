@@ -86,13 +86,9 @@ def calculate_flow_features(row):
         val = row.get(key)
         return val if val is not None else 0
 
-    # Initial TTL estimation (from max_ttl_forward if available, else from ttl)
-    max_ttl_fwd = row.get('max_ttl_forward')
-    if max_ttl_fwd:
-        features['initial_ttl'] = calculate_initial_ttl(max_ttl_fwd)
-    else:
-        ttl = row.get('ttl')
-        features['initial_ttl'] = calculate_initial_ttl(ttl) if ttl else None
+    # Initial TTL estimation (from tcp_syn_ttl only - position 20, 100% availability)
+    ttl = row.get('tcp_syn_ttl')
+    features['initial_ttl'] = calculate_initial_ttl(ttl) if ttl else None
 
     # Total bytes
     features['total_bytes'] = get_num('bytes_sent') + get_num('bytes_received')
@@ -641,11 +637,6 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                         'tls_ja3_fingerprint': tls_ja3_fingerprint,  # Position 91 ✨ NEW
 
                         # ============================================================
-                        # DERIVED FEATURES
-                        # ============================================================
-                        'flow_duration': flow_duration,  # Calculated from timestamps
-
-                        # ============================================================
                         # LABEL (Target)
                         # ============================================================
                         'os_family': os_family,  # Primary target for Model 1 family classification
@@ -714,7 +705,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     if 'os_family' in df.columns:
         print(df['os_family'].value_counts())
 
-    print(f"\nFeature completeness check (40 features extracted):")
+    print(f"\nFeature completeness check (38 features extracted):")
 
     # TCP Parameters (15 features)
     print(f"\n  TCP Parameters (15):")
@@ -782,8 +773,8 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
             print(f"    {status} {feat:<45}: {pct:>5.1f}%")
 
     # Derived Features
-    print(f"\n  Derived Features (2):")
-    derived_features = ['flow_duration', 'initial_ttl']
+    print(f"\n  Derived Features (1):")
+    derived_features = ['initial_ttl']
     for feat in derived_features:
         if feat in df.columns:
             pct = (df[feat].notna().sum() / len(df)) * 100
@@ -852,7 +843,7 @@ def main():
 
     print("\n✓ Success! Dataset ready for Model 1 (OS family classification) training.")
     print(f"\n" + "="*70)
-    print("EXTRACTED FEATURES SUMMARY (40 features total)")
+    print("EXTRACTED FEATURES SUMMARY (38 features total)")
     print("="*70)
     print(f"\n  ✅ TCP Parameters (15):")
     print(f"     - SYN size, window size, TTL, flags")
