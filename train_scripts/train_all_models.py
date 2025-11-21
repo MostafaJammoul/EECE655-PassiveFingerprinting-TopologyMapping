@@ -53,9 +53,9 @@ def check_prerequisites(verbose=True):
     data_dir = os.path.join(base_dir, 'data', 'processed')
 
     required_files = [
-        os.path.join(data_dir, 'masaryk.csv'),
-        os.path.join(data_dir, 'nprint.csv'),
-        os.path.join(data_dir, 'cesnet_merged.csv'),
+        'data/processed/masaryk.csv',
+        'data/processed/nprint.csv',
+        'data/processed/cesnet.csv',
     ]
 
     missing = []
@@ -100,8 +100,8 @@ def train_model1(args, verbose=True):
 
     cmd = [
         sys.executable,
-        script_path,
-        '--input', input_path,
+        'scripts/train_model1_family.py',
+        '--input', 'data/processed/masaryk.csv',
         '--output-dir', args.output_dir,
         '--results-dir', args.results_dir,
     ]
