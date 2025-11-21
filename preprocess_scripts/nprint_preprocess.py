@@ -353,6 +353,14 @@ def process_pcapng_with_metadata(pcap_path, syn_only=True, verbose=True):
         # Extract TCP timestamp
         tcp_ts_val, tcp_ts_ecr = extract_tcp_timestamp(tcp_layer)
 
+        # Extract TCP sequence and acknowledgment numbers
+        tcp_seq = tcp_layer.seq if hasattr(tcp_layer, 'seq') else None
+        tcp_ack_num = tcp_layer.ack if hasattr(tcp_layer, 'ack') else None
+
+        # Extract Initial Sequence Number (ISN) for SYN packets
+        # ISN is the sequence number of the SYN packet (critical for OS fingerprinting)
+        tcp_isn = tcp_seq if is_syn else None
+
         # Extract features
         record = {
             # Metadata
@@ -378,6 +386,11 @@ def process_pcapng_with_metadata(pcap_path, syn_only=True, verbose=True):
             'tcp_window_size': tcp_layer.window,
             'tcp_flags': int(tcp_layer.flags),
             'tcp_urgent_ptr': tcp_layer.urgptr if hasattr(tcp_layer, 'urgptr') else None,  # LOW but easy
+
+            # TCP sequence and acknowledgment (NEW - CRITICAL for ACK-based fingerprinting!)
+            'tcp_seq': tcp_seq,  # Sequence number (for all packets)
+            'tcp_ack': tcp_ack_num,  # Acknowledgment number (for ACK packets)
+            'tcp_isn': tcp_isn,  # Initial Sequence Number (for SYN packets only) - CRITICAL for OS detection
 
             # TCP options (CRITICAL for fingerprinting!)
             'tcp_mss': extract_tcp_mss(tcp_layer),
@@ -424,7 +437,8 @@ def process_pcapng_with_metadata(pcap_path, syn_only=True, verbose=True):
     if verbose:
         print(f"\nFeature completeness:")
         critical_features = ['ttl', 'tcp_window_size', 'tcp_mss', 'tcp_options_order',
-                            'tcp_timestamp_val', 'ip_id', 'ip_tos']
+                            'tcp_timestamp_val', 'tcp_seq', 'tcp_ack', 'tcp_isn',
+                            'ip_id', 'ip_tos']
         for feat in critical_features:
             if feat in df.columns:
                 pct_available = (df[feat].notna().sum() / len(df)) * 100
