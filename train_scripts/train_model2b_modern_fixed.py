@@ -242,12 +242,12 @@ def select_features_fixed(df, verbose=True):
 
     # IP features (FIXED - removed raw ip_id)
     ip_features = [
-        'ttl',  # CRITICAL: OS-specific TTL values
-        'initial_ttl',  # Estimated initial TTL
+        # REMOVED 'ttl' - redundant with initial_ttl (perfectly correlated)
+        'initial_ttl',  # CRITICAL: OS-specific initial TTL (64=Linux, 128=Windows, 255=Cisco)
         'df_flag',  # Don't Fragment
         'ip_len',  # IP packet length
         'ip_tos',  # Type of Service / DSCP
-        # REMOVED: 'ip_id' - replaced with behavioral features below
+        # REMOVED: 'ip_id' - cannot extract behavior from single packets
     ]
 
     # IP ID behavioral features - REMOVED for single-packet datasets

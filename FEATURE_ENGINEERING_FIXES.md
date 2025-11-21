@@ -136,7 +136,40 @@ This captures **behavioral patterns** (e.g., "Windows prefers higher ephemeral p
 
 ---
 
-### ✅ Fix 3: Increased Model Regularization
+### ✅ Fix 3: Remove TTL (redundant with initial_ttl)
+
+**Problem: Perfect Multicollinearity**
+
+The preprocessing extracts both `ttl` and `initial_ttl`:
+
+```python
+# cesnet_preprocess.py:254-255
+'ttl': ip_layer.ttl,                      # Observed TTL (e.g., 61, 125, 253)
+'initial_ttl': calculate_initial_ttl(ttl), # Estimated initial (e.g., 64, 128, 255)
+```
+
+Since `initial_ttl` is **deterministically calculated** from `ttl`, they are perfectly correlated!
+
+**Why keep only initial_ttl?**
+
+1. **OS fingerprint:** Initial TTL is what the OS sets (64=Linux, 128=Windows, 255=Cisco)
+2. **Network-independent:** Same value regardless of how many router hops
+3. **Industry standard:** p0f, Nmap, and PRADS all use initial TTL for OS detection
+4. **No information loss:** `ttl` provides no additional signal
+
+**Feature importance evidence:**
+```
+Original model:
+  ttl:         2.0% importance  ─┐
+  initial_ttl: 2.4% importance  ─┤ Combined: 4.4% (split across redundant features)
+                                 ─┘
+Fixed model:
+  initial_ttl: ~4-5% importance  (all signal in one feature)
+```
+
+---
+
+### ✅ Fix 4: Increased Model Regularization
 
 **Prevent single features from dominating:**
 
@@ -275,6 +308,7 @@ If these conditions are met, your model is learning **legitimate OS fingerprints
 |-------|--------|-----|
 | Port numbers in features | Learning app patterns, not OS | Removed raw ports, added categories |
 | IP ID too important | Overfitting to temporal patterns | Removed (single-packet limitation) |
+| TTL and initial_ttl redundant | Multicollinearity, diluted importance | Keep only initial_ttl (OS fingerprint) |
 | Single feature dominance | Brittle model, poor generalization | Increased regularization |
 
 **Bottom line:** The original model was learning **"what apps run on Windows"** instead of **"what makes Windows TCP stack unique"**. The fixed version focuses on legitimate OS fingerprints.
