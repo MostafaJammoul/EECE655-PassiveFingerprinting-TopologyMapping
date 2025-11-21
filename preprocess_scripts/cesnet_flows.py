@@ -152,19 +152,20 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
     flows_files = []
 
     for root, dirs, files in os.walk(cesnet_path):
-        # Get the immediate directory name
-        dir_name = Path(root).name
+        # Get the parent directory name (the OS name like linux__ubuntu__18.04.6)
+        root_path = Path(root)
+        parent_dir = root_path.parent.name
 
-        # Only process if directory name starts with "linux" (case-insensitive)
-        if dir_name.lower().startswith('linux') and 'flows.csv' in files:
-            flows_csv = Path(root) / 'flows.csv'
-            flows_files.append((flows_csv, dir_name))
+        # Only process if parent directory starts with "linux" (case-insensitive)
+        if parent_dir.lower().startswith('linux') and 'flows.csv' in files:
+            flows_csv = root_path / 'flows.csv'
+            flows_files.append((flows_csv, parent_dir))
             if verbose:
-                print(f"  Found: {dir_name}/flows.csv")
+                print(f"  Found: {parent_dir}/{root_path.name}/flows.csv")
 
     if not flows_files:
         print(f"\nERROR: No flows.csv files found in linux* directories")
-        print(f"Expected structure: {cesnet_dir}/linux__ubuntu__18.04.6/flows.csv")
+        print(f"Expected structure: {cesnet_dir}/linux__ubuntu__18.04.6/2025-XX-XX__*/flows.csv")
         return None
 
     print(f"\n  Total Linux directories found: {len(flows_files)}")
