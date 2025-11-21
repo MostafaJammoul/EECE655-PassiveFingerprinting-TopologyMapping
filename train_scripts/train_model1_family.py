@@ -264,7 +264,7 @@ def train_xgboost_model(X_train, y_train, X_val, y_val,
         'reg_alpha': 0.1,  # L1 regularization
         'reg_lambda': 1.0,  # L2 regularization
         'eval_metric': 'mlogloss',
-        'use_label_encoder': False,
+        'early_stopping_rounds': 20,  # Moved to constructor in XGBoost 2.0+
         'random_state': 42,
         'n_jobs': -1,
     }
@@ -272,18 +272,17 @@ def train_xgboost_model(X_train, y_train, X_val, y_val,
     if verbose:
         print(f"\n  XGBoost parameters:")
         for key, value in params.items():
-            if key not in ['use_label_encoder', 'eval_metric', 'objective']:
+            if key not in ['eval_metric', 'objective', 'early_stopping_rounds']:
                 print(f"    {key}: {value}")
 
     # Create and train model
     model = xgb.XGBClassifier(**params)
 
-    # Train with early stopping
+    # Train with validation set
     model.fit(
         X_train, y_train,
         sample_weight=sample_weights,
         eval_set=[(X_val, y_val)],
-        early_stopping_rounds=20,
         verbose=False
     )
 
