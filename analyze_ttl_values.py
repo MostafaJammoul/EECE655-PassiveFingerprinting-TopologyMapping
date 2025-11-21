@@ -241,6 +241,82 @@ def analyze_ttl_values(csv_path='data/raw/masaryk/flows_ground_truth_merged_anon
             print(f"    max_ttl_forward > tcp_syn_ttl: {forward_higher:,} ({forward_higher/len(df_diff)*100:.1f}%)")
             print(f"    tcp_syn_ttl > max_ttl_forward: {syn_higher:,} ({syn_higher/len(df_diff)*100:.1f}%)")
 
+    # TTL Anomaly Detection
+    print("\n" + "="*80)
+    print("TTL ANOMALY DETECTION - Mismatches between OS and Expected TTL")
+    print("="*80)
+
+    # Expected initial TTL for each OS family
+    expected_ttl = {
+        'Windows': 128,
+        'Linux': 64,
+        'macOS': 64,
+        'Android': 64,
+        'iOS': 64,
+        'BSD': 64,
+        'Other': None  # No expectation for Other
+    }
+
+    print("\nExpected Initial TTL values:")
+    print("  Windows  : 128")
+    print("  Linux    : 64")
+    print("  macOS    : 64")
+    print("  Android  : 64")
+    print("  iOS      : 64")
+    print("  BSD      : 64")
+
+    print("\n" + "-"*80)
+    print("Anomalies Found:")
+    print("-"*80)
+
+    total_anomalies = 0
+
+    for os_fam in ['Windows', 'Linux', 'macOS', 'Android', 'iOS', 'BSD']:
+        os_df = df[df['os_family'] == os_fam].copy()
+        if len(os_df) == 0:
+            continue
+
+        expected = expected_ttl[os_fam]
+
+        # Check initial_ttl_from_syn
+        os_df_with_ttl = os_df[os_df['initial_ttl_from_syn'].notna()]
+
+        if len(os_df_with_ttl) > 0:
+            anomalies = os_df_with_ttl[os_df_with_ttl['initial_ttl_from_syn'] != expected]
+            anomaly_count = len(anomalies)
+            anomaly_pct = (anomaly_count / len(os_df_with_ttl)) * 100
+
+            if anomaly_count > 0:
+                total_anomalies += anomaly_count
+                print(f"\n{os_fam} (Expected TTL: {expected}):")
+                print(f"  Total with TTL: {len(os_df_with_ttl):,}")
+                print(f"  Anomalies: {anomaly_count:,} ({anomaly_pct:.2f}%)")
+
+                # Show distribution of anomalous TTL values
+                anomaly_ttl_dist = anomalies['initial_ttl_from_syn'].value_counts().sort_index()
+                print(f"  Anomalous TTL distribution:")
+                for ttl_val, count in anomaly_ttl_dist.items():
+                    pct = (count / anomaly_count) * 100
+                    print(f"    TTL {int(ttl_val)}: {count:,} flows ({pct:.1f}%)")
+
+                # Show a few example raw TTL values for the most common anomaly
+                if len(anomalies) > 0:
+                    most_common_anomaly = anomaly_ttl_dist.index[0]
+                    examples = anomalies[anomalies['initial_ttl_from_syn'] == most_common_anomaly]['tcp_syn_ttl'].dropna().head(10)
+                    if len(examples) > 0:
+                        print(f"  Example raw TTL values for initial_ttl={int(most_common_anomaly)}: {examples.tolist()}")
+
+    if total_anomalies == 0:
+        print("\n✓ No anomalies detected! All OS families have expected initial TTL values.")
+    else:
+        print(f"\n⚠ Total anomalies across all OS families: {total_anomalies:,}")
+        print("\nPossible explanations for anomalies:")
+        print("  1. Misclassified OS (ground truth error)")
+        print("  2. Virtual machines / containers (may have different TTL)")
+        print("  3. Network appliances / proxies altering packets")
+        print("  4. Mobile devices with custom kernels")
+        print("  5. Very old/embedded systems with non-standard defaults")
+
     # Recommendation
     print("\n" + "="*80)
     print("RECOMMENDATION")
