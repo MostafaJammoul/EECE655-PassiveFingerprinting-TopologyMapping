@@ -117,6 +117,45 @@ def parse_tls_ext_type(ext_type_array):
         return None
 
 
+def convert_tcp_flags_to_string(tcp_flags_value):
+    """
+    Convert TCP flags bitmask to Masaryk string format
+
+    Format: C E U A P R S F
+    Where:
+    - C = CWR (Congestion Window Reduced) - bit 7 (0x80)
+    - E = ECE (ECN-Echo) - bit 6 (0x40)
+    - U = URG (Urgent) - bit 5 (0x20)
+    - A = ACK - bit 4 (0x10)
+    - P = PSH (Push) - bit 3 (0x08)
+    - R = RST (Reset) - bit 2 (0x04)
+    - S = SYN - bit 1 (0x02)
+    - F = FIN - bit 0 (0x01)
+
+    Example: 0x12 (SYN+ACK) -> "---A--S-"
+    Example: 0x18 (PSH+ACK) -> "---AP---"
+    """
+    if tcp_flags_value is None or pd.isna(tcp_flags_value):
+        return None
+
+    try:
+        flags = int(tcp_flags_value)
+
+        result = ""
+        result += "C" if (flags & 0x80) else "-"
+        result += "E" if (flags & 0x40) else "-"
+        result += "U" if (flags & 0x20) else "-"
+        result += "A" if (flags & 0x10) else "-"
+        result += "P" if (flags & 0x08) else "-"
+        result += "R" if (flags & 0x04) else "-"
+        result += "S" if (flags & 0x02) else "-"
+        result += "F" if (flags & 0x01) else "-"
+
+        return result
+    except:
+        return None
+
+
 # ============================================================================
 # MAIN PROCESSING
 # ============================================================================
@@ -218,7 +257,10 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
                     ip_ttl = row.get('IP_TTL')
                     initial_ttl = calculate_initial_ttl(ip_ttl)
 
-                    # Decode TLS features
+                    # Convert TCP flags to Masaryk string format (e.g., "---AP-S-")
+                    tcp_flags_a = convert_tcp_flags_to_string(row.get('TCP_FLAGS'))
+
+                    # Decode TLS features (set to None - not available in CESNET)
                     tls_ja3 = decode_ja3_bytes(row.get('TLS_JA3'))
                     tls_ext_types = parse_tls_ext_type(row.get('TLS_EXT_TYPE'))
 
@@ -230,7 +272,7 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
                         tcp_flags_rev_int = int(tcp_flags_rev)
                         syn_ack_flag = 1 if (tcp_flags_rev_int & 0x12) == 0x12 else 0
 
-                    # Build record in Masaryk format
+                    # Build record in Masaryk format (convert to float64 to match Masaryk datatypes)
                     record = {
                         # ============================================================
                         # METADATA
@@ -241,8 +283,8 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
                         # ============================================================
                         # BASIC FLOW PROPERTIES (6 features)
                         # ============================================================
-                        'bytes_a': row.get('BYTES'),
-                        'packets_a': row.get('PACKETS'),
+                        'bytes_a': float(row.get('BYTES')) if pd.notna(row.get('BYTES')) else None,
+                        'packets_a': float(row.get('PACKETS')) if pd.notna(row.get('PACKETS')) else None,
                         'src_port': row.get('SRC_PORT'),
                         'dst_port': row.get('DST_PORT'),
                         'packet_total_count_forward': row.get('PACKETS'),
@@ -262,16 +304,16 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
                         # ============================================================
                         # TCP PARAMETERS (15 features)
                         # ============================================================
-                        'tcp_syn_size': row.get('TCP_SYN_SIZE'),
-                        'tcp_win_size': row.get('TCP_WIN'),
+                        'tcp_syn_size': float(row.get('TCP_SYN_SIZE')) if pd.notna(row.get('TCP_SYN_SIZE')) else None,
+                        'tcp_win_size': float(row.get('TCP_WIN')) if pd.notna(row.get('TCP_WIN')) else None,
                         'tcp_syn_ttl': ip_ttl,
-                        'tcp_flags_a': None,  # CESNET has bitmask, not string - set to None
+                        'tcp_flags_a': tcp_flags_a,  # Converted from bitmask to string (e.g., "---AP-S-")
                         'syn_ack_flag': syn_ack_flag,
-                        'tcp_option_window_scale_forward': tcp_opt_fwd['window_scale'],
-                        'tcp_option_window_scale_backward': tcp_opt_rev['window_scale'],
+                        'tcp_option_window_scale_forward': float(tcp_opt_fwd['window_scale']) if tcp_opt_fwd['window_scale'] is not None else None,
+                        'tcp_option_window_scale_backward': float(tcp_opt_rev['window_scale']) if tcp_opt_rev['window_scale'] is not None else None,
                         'tcp_option_selective_ack_permitted_forward': tcp_opt_fwd['sack_permitted'],
                         'tcp_option_selective_ack_permitted_backward': tcp_opt_rev['sack_permitted'],
-                        'tcp_option_maximum_segment_size_forward': row.get('TCP_MSS'),
+                        'tcp_option_maximum_segment_size_forward': float(row.get('TCP_MSS')) if pd.notna(row.get('TCP_MSS')) else None,
                         'tcp_option_maximum_segment_size_backward': row.get('TCP_MSS_REV'),
                         'tcp_option_no_operation_forward': tcp_opt_fwd['nop'],
                         'tcp_option_no_operation_backward': tcp_opt_rev['nop'],
@@ -289,7 +331,7 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
                         # TLS FINGERPRINTING FEATURES (7 features) - PARTIAL
                         # ============================================================
                         'tls_handshake_type': None,  # NOT AVAILABLE
-                        'tls_client_version': row.get('TLS_VERSION'),
+                        'tls_client_version': float(row.get('TLS_VERSION')) if pd.notna(row.get('TLS_VERSION')) else None,
                         'tls_cipher_suites': None,  # NOT AVAILABLE
                         'tls_extension_types': tls_ext_types,
                         'tls_elliptic_curves': None,  # NOT AVAILABLE
@@ -299,7 +341,7 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
                         # ============================================================
                         # DERIVED FEATURES
                         # ============================================================
-                        'initial_ttl': initial_ttl,
+                        'initial_ttl': float(initial_ttl) if initial_ttl is not None else None,
                         'total_bytes': (row.get('BYTES') or 0) + (row.get('BYTES_REV') or 0),
 
                         # ============================================================
