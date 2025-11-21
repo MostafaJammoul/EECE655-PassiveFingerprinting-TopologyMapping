@@ -34,76 +34,34 @@ def analyze_masaryk_completeness(csv_path='data/raw/masaryk/flows_ground_truth_m
         print("  data/raw/masaryk/flows_ground_truth_merged_anonymized.csv")
         return
 
-    # Read first line to get column count
-    print("[1/3] Detecting file structure...")
+    # Read header row to get actual column names
+    print("[1/3] Reading header row...")
     with open(csv_file, 'r', encoding='utf-8') as f:
-        first_line = f.readline().strip()
-        fields = first_line.split(';')
-        num_fields = len(fields)
-        print(f"  Found {num_fields} semicolon-separated fields")
-
-    # Define column names based on positions from masaryk_preprocess.py
-    # These are the known field positions - we'll name them accordingly
-    column_names = {
-        0: "flow_id",
-        1: "os_label",
-        2: "os_version",
-        3: "field_3",
-        4: "field_4",
-        5: "field_5",
-        6: "start_timestamp",
-        7: "end_timestamp",
-        8: "l3_proto",
-        9: "l4_proto",
-        10: "bytes_a",
-        11: "packets_a",
-        12: "src_ip",
-        13: "dst_ip",
-        14: "tcp_flags_a",
-        15: "src_port",
-        16: "dst_port",
-        17: "icmp_type",
-        18: "tcp_syn_size",
-        19: "tcp_win_size",
-        20: "tcp_syn_ttl",
-        21: "ip_tos",
-        # Fields 22-86 are unknown/not documented in preprocessing script
-        87: "maximum_ttl_forward",
-        88: "maximum_ttl_backward",
-        89: "ipv4_dont_fragment_forward",
-        90: "ipv4_dont_fragment_backward",
-        91: "tcp_timestamp_first_packet_forward",
-        92: "tcp_timestamp_first_packet_backward",
-        93: "tcp_option_window_scale_forward",
-        94: "tcp_option_window_scale_backward",
-        95: "tcp_option_selective_ack_permitted_forward",
-        96: "tcp_option_selective_ack_permitted_backward",
-        97: "tcp_option_maximum_segment_size_forward",
-        98: "tcp_option_maximum_segment_size_backward",
-        99: "tcp_option_no_operation_forward",
-        100: "tcp_option_no_operation_backward",
-        101: "packet_total_count_forward",
-        102: "packet_total_count_backward",
-        103: "flow_direction",
-        104: "flow_end_reason",
-        105: "syn_ack_flag",
-    }
-
-    # Fill in remaining unknown fields
-    for i in range(num_fields):
-        if i not in column_names:
-            column_names[i] = f"field_{i}"
+        header_line = f.readline().strip()
+        column_names = header_line.split(';')
+        num_fields = len(column_names)
+        print(f"  Found {num_fields} columns in header")
+        print(f"\n  First 10 columns:")
+        for i, col in enumerate(column_names[:10]):
+            print(f"    {i}: {col}")
+        print(f"  ...")
+        print(f"  Last 5 columns:")
+        for i, col in enumerate(column_names[-5:], start=len(column_names)-5):
+            print(f"    {i}: {col}")
 
     # Read the CSV with proper parsing
-    print(f"\n[2/3] Reading CSV file (this may take a while)...")
+    print(f"\n[2/3] Reading CSV data (this may take a while)...")
 
-    # Read line by line and parse
+    # Read line by line and parse (skip header)
     all_rows = []
     total_lines = 0
     error_lines = 0
 
     with open(csv_file, 'r', encoding='utf-8') as f:
-        for line_num, line in enumerate(f, 1):
+        # Skip header
+        next(f)
+
+        for line_num, line in enumerate(f, 2):  # Start at 2 since row 1 is header
             line = line.strip()
             if not line:
                 continue
@@ -122,18 +80,18 @@ def analyze_masaryk_completeness(csv_path='data/raw/masaryk/flows_ground_truth_m
 
             # Progress indicator
             if total_lines % 100000 == 0:
-                print(f"  Processed {total_lines:,} rows...")
+                print(f"  Processed {total_lines:,} data rows...")
 
             # Limit for quick analysis (remove this for full analysis)
             # if total_lines >= 500000:
             #     print(f"  Stopping at {total_lines:,} rows for quick analysis")
             #     break
 
-    print(f"  Total rows processed: {total_lines:,}")
+    print(f"  Total data rows processed: {total_lines:,}")
 
     # Convert to DataFrame
     print(f"\n[3/3] Analyzing column completeness...")
-    df = pd.DataFrame(all_rows, columns=[column_names.get(i, f"field_{i}") for i in range(num_fields)])
+    df = pd.DataFrame(all_rows, columns=column_names)
 
     # Calculate completeness for each column
     print("\n" + "="*80)
@@ -141,6 +99,24 @@ def analyze_masaryk_completeness(csv_path='data/raw/masaryk/flows_ground_truth_m
     print("="*80)
     print(f"\nTotal rows: {len(df):,}")
     print(f"Total columns: {len(df.columns)}\n")
+
+    # Print ALL columns first
+    print("\n" + "="*80)
+    print("ALL COLUMNS (Complete List)")
+    print("="*80)
+    print(f"{'Position':<10} {'Column Name':<50} {'Completeness':<15}")
+    print("-"*80)
+
+    for i, col in enumerate(column_names):
+        non_empty = df[col].apply(lambda x: x is not None and
+                                             x != '' and
+                                             str(x).lower() != 'none' and
+                                             str(x).lower() != 'nan').sum()
+        pct_complete = (non_empty / len(df)) * 100
+        status = "✓" if pct_complete > 80 else ("⚠" if pct_complete > 50 else "✗")
+        print(f"{status} {i:<8} {col:<50} {pct_complete:>6.2f}%")
+
+    print(f"\n{'='*80}")
 
     # Group columns by category
     tcp_features = [col for col in df.columns if 'tcp' in col.lower()]
@@ -173,9 +149,11 @@ def analyze_masaryk_completeness(csv_path='data/raw/masaryk/flows_ground_truth_m
 
             pct_complete = (non_empty / len(df)) * 100
 
-            # Get position
-            pos = [k for k, v in column_names.items() if v == col]
-            pos_str = str(pos[0]) if pos else "?"
+            # Get position (index in column_names list)
+            try:
+                pos_str = str(column_names.index(col))
+            except ValueError:
+                pos_str = "?"
 
             results.append((col, pos_str, pct_complete))
 
@@ -193,30 +171,40 @@ def analyze_masaryk_completeness(csv_path='data/raw/masaryk/flows_ground_truth_m
     analyze_columns(ip_features, "IP FEATURES")
     analyze_columns(flow_features, "FLOW STATISTICS")
 
-    # Unknown fields
-    unknown_fields = [col for col in df.columns if col.startswith('field_') and
-                      col not in metadata_features + network_features + tcp_features + ip_features + flow_features]
+    # All other fields (not in defined categories)
+    categorized = set(metadata_features + network_features + tcp_features + ip_features + flow_features)
+    other_fields = [col for col in df.columns if col not in categorized]
 
-    if unknown_fields:
+    if other_fields:
         print(f"\n{'='*80}")
-        print("UNKNOWN FIELDS")
+        print("OTHER FIELDS (Not in defined categories)")
         print(f"{'='*80}")
         print(f"{'Column Name':<50} {'Position':<10} {'Completeness':<15}")
         print("-"*80)
 
-        for col in sorted(unknown_fields, key=lambda x: int(x.split('_')[1])):
+        results = []
+        for col in other_fields:
             non_empty = df[col].apply(lambda x: x is not None and
                                                  x != '' and
                                                  str(x).lower() != 'none' and
                                                  str(x).lower() != 'nan').sum()
             pct_complete = (non_empty / len(df)) * 100
 
-            pos = [k for k, v in column_names.items() if v == col]
-            pos_str = str(pos[0]) if pos else "?"
+            # Get position
+            try:
+                pos_str = str(column_names.index(col))
+            except ValueError:
+                pos_str = "?"
 
-            status = "✓" if pct_complete > 80 else ("⚠" if pct_complete > 50 else "✗")
             if pct_complete > 10:  # Only show fields with >10% data
-                print(f"{status} {col:<48} {pos_str:<10} {pct_complete:>6.2f}%")
+                results.append((col, pos_str, pct_complete))
+
+        # Sort by position
+        results.sort(key=lambda x: int(x[1]) if x[1].isdigit() else 999)
+
+        for col, pos_str, pct_complete in results:
+            status = "✓" if pct_complete > 80 else ("⚠" if pct_complete > 50 else "✗")
+            print(f"{status} {col:<48} {pos_str:<10} {pct_complete:>6.2f}%")
 
     # Summary of critical OS fingerprinting features
     print("\n" + "="*80)
