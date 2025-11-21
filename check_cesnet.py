@@ -17,7 +17,7 @@ except ImportError:
     sys.exit(1)
 
 
-def check_cesnet_distribution(csv_path='data/processed/cesnet.csv'):
+def check_cesnet_distribution(csv_path='data/processed/cesnet_merged.csv'):
     """
     Check OS version distribution in CESNET dataset
 
@@ -133,7 +133,7 @@ def main():
     parser.add_argument(
         '--input',
         type=str,
-        default='data/processed/cesnet.csv',
+        default='data/processed/cesnet_merged.csv',
         help='Path to cesnet CSV file (default: data/processed/cesnet.csv)'
     )
 
@@ -145,7 +145,6 @@ def main():
         sys.exit(1)
 
     print("\n✓ Analysis complete!")
-
 
 if __name__ == '__main__':
     main()

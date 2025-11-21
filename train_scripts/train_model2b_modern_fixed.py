@@ -663,7 +663,7 @@ def main():
         description='Train Model 2b (FIXED): Modern OS Classifier - removes port/IP ID overfitting'
     )
 
-    parser.add_argument('--input', type=str, default='datasets/cesnet_merged.csv')
+    parser.add_argument('--input', type=str, default='data/processed/cesnet_merged.csv')
     parser.add_argument('--output-dir', type=str, default='models')
     parser.add_argument('--results-dir', type=str, default='results')
     parser.add_argument('--merge-classes', action='store_true',
