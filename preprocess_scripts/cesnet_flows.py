@@ -182,6 +182,10 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
         try:
             # Read flows.csv
             df = pd.read_csv(flows_file)
+
+            # Strip type prefixes from column names (e.g., "uint8 PROTOCOL" -> "PROTOCOL")
+            df.columns = [col.split()[-1] if ' ' in col else col for col in df.columns]
+
             total_flows += len(df)
 
             # Filter for TCP flows with SYN flag
