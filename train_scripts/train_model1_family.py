@@ -481,13 +481,23 @@ def main():
     args = parser.parse_args()
     verbose = not args.quiet
 
+    # Create dated folder name for this training run
+    from datetime import datetime
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    dated_folder = f"FamilyClassifier_{date_str}"
+
+    # Update output directories to use dated folders
+    args.output_dir = os.path.join(args.output_dir, dated_folder)
+    args.results_dir = os.path.join(args.results_dir, dated_folder)
+
     # Print header
     if verbose:
         print("="*70)
         print("MODEL 1: OS FAMILY CLASSIFIER (MASARYK DATASET)")
         print("="*70)
         print(f"\nInput:  {args.input}")
-        print(f"Output: {args.output_dir}/model1_os_family.pkl")
+        print(f"Output: {args.output_dir}/")
+        print(f"Results: {args.results_dir}/")
         print(f"Algorithm: XGBoost")
         if args.use_adasyn:
             print(f"Oversampling: ADASYN")
