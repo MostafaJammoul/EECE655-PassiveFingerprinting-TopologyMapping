@@ -378,6 +378,13 @@ def process_cesnet_flows(cesnet_dir='data/raw/cesnet',
         print(f"\n  WARNING: No records were successfully processed!")
         return df
 
+    # Fix data types to match Masaryk format
+    # Convert string columns that are all None to object dtype (not float64)
+    string_columns = ['tls_cipher_suites', 'tls_elliptic_curves']
+    for col in string_columns:
+        if col in df.columns:
+            df[col] = df[col].astype('object')
+
     # Save
     print(f"\n[3/3] Saving processed dataset...")
     os.makedirs(output_dir, exist_ok=True)
