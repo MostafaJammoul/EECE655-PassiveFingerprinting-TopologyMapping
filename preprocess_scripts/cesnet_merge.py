@@ -126,7 +126,8 @@ def merge_cesnet_os_versions(input_path='data/processed/cesnet.csv',
         merge_operations.append(f"  ✓ Merged {rhel_versions} → 'Red Hat Enterprise Linux 9' ({rhel_count:,} records)")
 
     # 5. Merge Ubuntu 20.04.6 LTS and Ubuntu 22.04.4 LTS → "Ubuntu 20/22 LTS"
-    ubuntu_20_22_versions = ['Ubuntu 20.04.6 LTS', 'Ubuntu 22.04.4 LTS']
+    # Note: Some Ubuntu versions might appear with or without "LTS" suffix
+    ubuntu_20_22_versions = ['Ubuntu 20.04.6 LTS', 'Ubuntu 20.04.6', 'Ubuntu 22.04.4 LTS', 'Ubuntu 22.04.4']
     ubuntu_20_22_mask = df_merged['os_label'].isin(ubuntu_20_22_versions)
     ubuntu_20_22_count = ubuntu_20_22_mask.sum()
     if ubuntu_20_22_count > 0:
@@ -134,7 +135,8 @@ def merge_cesnet_os_versions(input_path='data/processed/cesnet.csv',
         merge_operations.append(f"  ✓ Merged {ubuntu_20_22_versions} → 'Ubuntu 20/22 LTS' ({ubuntu_20_22_count:,} records)")
 
     # 6. Merge Ubuntu 16.04.6 LTS and Ubuntu 18.04.6 → "Ubuntu 16/18 LTS"
-    ubuntu_16_18_versions = ['Ubuntu 16.04.6 LTS', 'Ubuntu 18.04.6 LTS']
+    # Note: Ubuntu 18.04.6 might appear with or without "LTS" suffix
+    ubuntu_16_18_versions = ['Ubuntu 16.04.6 LTS', 'Ubuntu 18.04.6 LTS', 'Ubuntu 18.04.6']
     ubuntu_16_18_mask = df_merged['os_label'].isin(ubuntu_16_18_versions)
     ubuntu_16_18_count = ubuntu_16_18_mask.sum()
     if ubuntu_16_18_count > 0:
