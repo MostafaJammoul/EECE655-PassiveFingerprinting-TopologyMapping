@@ -49,9 +49,9 @@ def check_prerequisites(verbose=True):
     """Check if preprocessed data exists"""
 
     required_files = [
-        'data/processed/masaryk_processed.csv',
-        'data/processed/nprint_packets.csv',
-        'data/processed/cesnet_idle_packets.csv',
+        'data/processed/masaryk.csv',
+        'data/processed/nprint.csv',
+        'data/processed/cesnet.csv',
     ]
 
     missing = []
@@ -91,7 +91,7 @@ def train_model1(args, verbose=True):
     cmd = [
         sys.executable,
         'scripts/train_model1_family.py',
-        '--input', 'data/processed/masaryk_processed.csv',
+        '--input', 'data/processed/masaryk.csv',
         '--output-dir', args.output_dir,
         '--results-dir', args.results_dir,
     ]

@@ -6,10 +6,11 @@ Dataset: Masaryk (TCP SYN flow-level features)
 Task: Classify OS family (Windows, Linux, macOS, Android, iOS, BSD)
 Algorithm: XGBoost (best for medium-large datasets with categorical targets)
 
-Input:  data/processed/masaryk_processed.csv
+Input:  data/processed/masaryk.csv
 Output: models/model1_os_family.pkl
         models/model1_feature_names.pkl
         models/model1_label_encoder.pkl
+        models/model1_categorical_encoders.pkl
         results/model1_evaluation.json
 """
 
@@ -58,41 +59,42 @@ def select_features(df, verbose=True):
         # Basic TCP features
         'tcp_syn_size',
         'tcp_win_size',  # Added alias for tcp_window_size
+        'tcp_syn_ttl',  # TCP SYN TTL value
+        'tcp_flags_a',  # TCP flags string (e.g., "---AP-SF") - requires encoding
+        'syn_ack_flag',  # SYN-ACK flag indicator
 
         # TCP Options (CRITICAL - Different OSes have unique patterns)
-        'tcp_win_scale_forward',  # NEW: HIGH importance
-        'tcp_win_scale_backward',  # NEW: HIGH importance
-        'tcp_mss_forward',  # NEW: HIGH importance
-        'tcp_mss_backward',  # NEW: HIGH importance
-        'tcp_sack_permitted_forward',  # NEW: MEDIUM importance
-        'tcp_sack_permitted_backward',  # NEW: MEDIUM importance
+        'tcp_option_window_scale_forward',  # NEW: HIGH importance
+        'tcp_option_window_scale_backward',  # NEW: HIGH importance
+        'tcp_option_maximum_segment_size_forward',  # NEW: HIGH importance
+        'tcp_option_maximum_segment_size_backward',  # NEW: HIGH importance
+        'tcp_option_selective_ack_permitted_forward',  # NEW: MEDIUM importance
+        'tcp_option_selective_ack_permitted_backward',  # NEW: MEDIUM importance
         # 'tcp_timestamp_forward',  # REMOVED - 0.00% availability in Masaryk
         # 'tcp_timestamp_backward',  # REMOVED - 0.00% availability in Masaryk
-        'tcp_nop_forward',  # NEW: LOW importance
-        'tcp_nop_backward',  # NEW: LOW importance
+        'tcp_option_no_operation_forward',  # NEW: LOW importance
+        'tcp_option_no_operation_backward',  # NEW: LOW importance
     ]
 
     # IP-level features (ENHANCED with critical discriminators)
     ip_features = [
-        'ttl',  # Time to Live
-        'initial_ttl',  # NEW: Estimated initial TTL (64=Linux/Mac, 128=Windows)
-        'df_flag_forward',  # NEW: Don't Fragment flag forward
-        'df_flag_backward',  # NEW: Don't Fragment flag backward
-        'ip_tos',  # NEW: MEDIUM importance - Type of Service
-        'max_ttl_forward',  # NEW: Maximum TTL observed forward
-        'max_ttl_backward',  # NEW: Maximum TTL observed backward
+        'initial_ttl',  # Estimated initial TTL (64=Linux/Mac, 128=Windows)
+        'ipv4_dont_fragment_forward',  # Don't Fragment flag forward
+        'ipv4_dont_fragment_backward',  # Don't Fragment flag backward
+        'ip_tos',  # Type of Service
+        'maximum_ttl_forward',  # Maximum TTL observed forward
+        'maximum_ttl_backward',  # Maximum TTL observed backward
+        'l3_proto',  # L3 protocol
+        'l4_proto',  # L4 protocol
     ]
 
     # Flow-level behavioral features
     flow_features = [
-        'flow_duration',
-        'pkt_count',
-        'total_bytes',
-        'pkt_rate',
-        'byte_rate',
-        'avg_pkt_size',
-        'pkt_count_forward',
-        'pkt_count_backward',
+        'bytes_a',  # Total bytes in direction A
+        'packets_a',  # Total packets in direction A
+        'packet_total_count_forward',  # Packet count forward
+        'packet_total_count_backward',  # Packet count backward
+        'total_bytes',  # Total bytes (derived feature)
     ]
 
     # Port-based features (some services are OS-specific)
@@ -101,8 +103,28 @@ def select_features(df, verbose=True):
         'dst_port',
     ]
 
+    # NPM timing features
+    npm_features = [
+        'npm_round_trip_time',
+        'npm_tcp_retransmission_a',
+        'npm_tcp_retransmission_b',
+        'npm_tcp_out_of_order_a',
+        'npm_tcp_out_of_order_b',
+    ]
+
+    # TLS fingerprinting features (string features - require encoding)
+    tls_features = [
+        'tls_handshake_type',
+        'tls_client_version',
+        'tls_cipher_suites',
+        'tls_extension_types',
+        'tls_elliptic_curves',
+        'tls_client_key_length',
+        'tls_ja3_fingerprint',
+    ]
+
     # Combine all features
-    all_features = tcp_features + ip_features + flow_features + port_features
+    all_features = tcp_features + ip_features + flow_features + port_features + npm_features + tls_features
 
     # Select only features that exist in the dataframe
     available_features = [f for f in all_features if f in df.columns]
@@ -120,6 +142,44 @@ def select_features(df, verbose=True):
     return available_features
 
 
+def encode_categorical_features(X, verbose=True):
+    """
+    Encode categorical/string features using LabelEncoder
+
+    String features like tcp_flags_a, TLS features need to be encoded
+    to numeric values before training.
+    """
+    from sklearn.preprocessing import LabelEncoder
+
+    # Identify string/object columns
+    string_columns = X.select_dtypes(include=['object']).columns.tolist()
+
+    if not string_columns:
+        if verbose:
+            print(f"\nCategorical Encoding:")
+            print(f"  No string features to encode")
+        return X, {}
+
+    if verbose:
+        print(f"\nCategorical Encoding:")
+        print(f"  Encoding {len(string_columns)} string features:")
+        for col in string_columns:
+            unique_count = X[col].nunique()
+            print(f"    {col}: {unique_count} unique values")
+
+    X_encoded = X.copy()
+    encoders = {}
+
+    for col in string_columns:
+        le = LabelEncoder()
+        # Handle NaN values by filling with a placeholder
+        X_encoded[col] = X_encoded[col].fillna('__MISSING__')
+        X_encoded[col] = le.fit_transform(X_encoded[col].astype(str))
+        encoders[col] = le
+
+    return X_encoded, encoders
+
+
 def handle_missing_values(X, strategy='median', verbose=True):
     """
     Handle missing values in feature matrix
@@ -128,6 +188,8 @@ def handle_missing_values(X, strategy='median', verbose=True):
     - 'median': Replace with median (best for continuous features)
     - 'mean': Replace with mean
     - 'zero': Replace with 0
+
+    Note: This should be called AFTER encode_categorical_features()
     """
     if verbose:
         missing_before = X.isnull().sum().sum()
@@ -372,7 +434,7 @@ def main():
     parser.add_argument(
         '--input',
         type=str,
-        default='data/processed/masaryk_processed.csv',
+        default='data/processed/masaryk.csv',
         help='Input CSV file with preprocessed Masaryk data'
     )
 
@@ -476,7 +538,10 @@ def main():
     X = df[feature_columns].copy()
     y = df['os_family'].values
 
-    # Handle missing values
+    # Encode categorical/string features (e.g., tcp_flags_a, TLS features)
+    X, categorical_encoders = encode_categorical_features(X, verbose=verbose)
+
+    # Handle missing values (after encoding)
     X = handle_missing_values(X, strategy='median', verbose=verbose)
 
     # Encode labels
@@ -560,6 +625,13 @@ def main():
         pickle.dump(label_encoder, f)
     if verbose:
         print(f"  Label encoder saved: {encoder_path}")
+
+    # Save categorical encoders (for string features like tcp_flags_a, TLS features)
+    cat_encoder_path = os.path.join(args.output_dir, 'model1_categorical_encoders.pkl')
+    with open(cat_encoder_path, 'wb') as f:
+        pickle.dump(categorical_encoders, f)
+    if verbose:
+        print(f"  Categorical encoders saved: {cat_encoder_path}")
 
     # Save class weights
     weights_path = os.path.join(args.output_dir, 'model1_class_weights.pkl')
