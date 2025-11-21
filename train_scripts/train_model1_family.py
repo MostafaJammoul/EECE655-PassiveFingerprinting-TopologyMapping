@@ -474,6 +474,12 @@ def main():
     )
 
     parser.add_argument(
+        '--use-adasyn',
+        action='store_true',
+        help='Use ADASYN oversampling to handle class imbalance (requires imbalanced-learn)'
+    )
+
+    parser.add_argument(
         '--quiet',
         action='store_true',
         help='Suppress verbose output'
@@ -490,6 +496,8 @@ def main():
         print(f"\nInput:  {args.input}")
         print(f"Output: {args.output_dir}/model1_os_family.pkl")
         print(f"Algorithm: XGBoost")
+        if args.use_adasyn:
+            print(f"Oversampling: ADASYN")
 
     # Load data
     if verbose:
@@ -579,6 +587,41 @@ def main():
         print(f"  Training: {len(X_train):,} samples")
         print(f"  Validation: {len(X_val):,} samples")
         print(f"  Test: {len(X_test):,} samples")
+
+    # Apply ADASYN oversampling if requested
+    if args.use_adasyn:
+        if verbose:
+            print(f"\n[3.5/6] Applying ADASYN oversampling...")
+
+        try:
+            from imblearn.over_sampling import ADASYN
+
+            # Show class distribution before ADASYN
+            if verbose:
+                print(f"\n  Class distribution BEFORE ADASYN:")
+                unique, counts = np.unique(y_train, return_counts=True)
+                for cls, count in zip(unique, counts):
+                    cls_name = label_encoder.inverse_transform([cls])[0]
+                    print(f"    {cls_name:<15}: {count:>6,}")
+
+            # Apply ADASYN
+            adasyn = ADASYN(random_state=args.random_state, n_jobs=-1)
+            X_train, y_train = adasyn.fit_resample(X_train, y_train)
+
+            # Show class distribution after ADASYN
+            if verbose:
+                print(f"\n  Class distribution AFTER ADASYN:")
+                unique, counts = np.unique(y_train, return_counts=True)
+                for cls, count in zip(unique, counts):
+                    cls_name = label_encoder.inverse_transform([cls])[0]
+                    print(f"    {cls_name:<15}: {count:>6,}")
+
+                print(f"\n  ✓ ADASYN completed: {len(X_train):,} training samples")
+
+        except ImportError:
+            print(f"\n  ✗ ERROR: imbalanced-learn not installed!")
+            print(f"  Install with: pip install imbalanced-learn")
+            sys.exit(1)
 
     # Train model
     if verbose:
