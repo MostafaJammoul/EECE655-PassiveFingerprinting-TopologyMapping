@@ -348,10 +348,11 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                         continue
 
                     # Extract TCP flags (position 14) - NEW: extract as feature, not just for filtering
+                    # Note: This is a string like "---AP-SF", not an integer
                     tcp_flags_a = None
                     try:
                         if len(fields) > 14 and fields[14]:
-                            tcp_flags_a = int(fields[14])
+                            tcp_flags_a = fields[14].strip()
                     except (ValueError, TypeError):
                         pass
 
@@ -365,9 +366,9 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                             has_syn = (syn_ack_flag > 0)  # Non-zero means SYN/SYN-ACK present
                     except (ValueError, TypeError):
                         # If synAckFlag not available, check TCP flags field (position 14)
+                        # tcp_flags_a is a string like "---AP-SF" where 'S' indicates SYN
                         if tcp_flags_a is not None:
-                            # SYN flag is bit 1 (0x02)
-                            has_syn = (tcp_flags_a & 0x02) != 0
+                            has_syn = 'S' in tcp_flags_a
 
                     if not has_syn:
                         filtered_no_syn += 1
