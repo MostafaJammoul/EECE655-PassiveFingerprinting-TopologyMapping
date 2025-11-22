@@ -248,7 +248,7 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
         print(f"\nInput:  {pcap_path}")
         print(f"Filter: {filter_mode}")
         if ip_mapping:
-            print(f"IP Filter: {len(ip_mapping)} specific IPs")
+            print(f"IP Filter: {len(ip_mapping)} specific SOURCE IPs (flows initiated by)")
             for ip, label in ip_mapping.items():
                 print(f"  {ip} -> {label}")
 
@@ -318,12 +318,11 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
 
         # Filter by IP mapping if provided
         if ip_mapping:
-            # Check if either src or dst IP is in the mapping
+            # Only check if SOURCE IP is in the mapping (flows initiated by these IPs)
+            # We want to capture SYN packets and TLS ClientHello sent by these machines
             os_label = get_os_label_from_ip(src_ip, ip_mapping)
-            if not os_label:
-                os_label = get_os_label_from_ip(dst_ip, ip_mapping)
 
-            # Skip flow if neither IP is in the mapping
+            # Skip flow if source IP is not in the mapping
             if not os_label:
                 filtered_no_ip_match += 1
                 continue
@@ -530,7 +529,7 @@ def main():
     parser.add_argument(
         '--use-windows-ips',
         action='store_true',
-        help='Filter flows to Windows expert model IPs only (192.168.10.5/8/9/14/15)'
+        help='Filter to flows INITIATED by Windows expert model IPs (192.168.10.5/8/9/14/15)'
     )
 
     parser.add_argument(
@@ -548,8 +547,8 @@ def main():
     if args.use_windows_ips:
         ip_mapping = WINDOWS_IP_MAPPING
         if verbose:
-            print(f"\n🎯 Using Windows Expert Model IP filtering")
-            print(f"   Filtering to {len(ip_mapping)} specific IPs:")
+            print(f"\n🎯 Using Windows Expert Model IP filtering (SOURCE IPs only)")
+            print(f"   Filtering to flows INITIATED by {len(ip_mapping)} specific IPs:")
             for ip, label in ip_mapping.items():
                 print(f"     {ip} -> {label}")
 
