@@ -460,7 +460,8 @@ def train_windows_expert(input_path='data/processed/nprint_windows_flows.csv',
         )
 
         print(f"\n  CV Accuracy: {cv_scores.mean()*100:.2f}% (+/- {cv_scores.std()*2*100:.2f}%)")
-        print(f"  Fold scores: {[f'{s*100:.2f}%' for s in cv_scores]}")
+        fold_scores_str = [f'{s*100:.2f}%' for s in cv_scores]
+        print(f"  Fold scores: {fold_scores_str}")
 
     # Save model and artifacts
     if verbose:
