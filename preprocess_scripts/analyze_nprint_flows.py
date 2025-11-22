@@ -202,6 +202,54 @@ WINDOWS_IP_MAPPING = {
     '192.168.10.15': 'Windows 10',    # Win 10, 64B
 }
 
+# Flow timeout settings (matches NetFlow/IPFIX behavior)
+FLOW_IDLE_TIMEOUT = 15.0   # seconds - flow ends if no packets for 15s
+FLOW_ACTIVE_TIMEOUT = 60.0  # seconds - flow ends after 60s from start
+
+
+def apply_flow_timeouts(flow_packets, idle_timeout=FLOW_IDLE_TIMEOUT,
+                       active_timeout=FLOW_ACTIVE_TIMEOUT):
+    """
+    Apply idle and active timeouts to flow packets
+
+    Mimics NetFlow/IPFIX flow export behavior:
+    - IDLE timeout: Flow ends if gap between packets > idle_timeout
+    - ACTIVE timeout: Flow ends after active_timeout from first packet
+
+    Args:
+        flow_packets: List of packet dicts with 'timestamp' key (sorted by time)
+        idle_timeout: Maximum idle time between packets (seconds)
+        active_timeout: Maximum total flow duration (seconds)
+
+    Returns:
+        Filtered list of packets within timeout constraints
+    """
+    if not flow_packets or len(flow_packets) == 0:
+        return flow_packets
+
+    # Get first packet timestamp (flow start)
+    flow_start_time = flow_packets[0]['timestamp']
+
+    # Filter packets based on timeouts
+    valid_packets = []
+    prev_packet_time = flow_start_time
+
+    for pkt_info in flow_packets:
+        current_time = pkt_info['timestamp']
+
+        # Check active timeout (time since flow start)
+        if current_time - flow_start_time > active_timeout:
+            break  # Flow exceeded active timeout
+
+        # Check idle timeout (time since last packet)
+        if current_time - prev_packet_time > idle_timeout:
+            break  # Flow exceeded idle timeout
+
+        valid_packets.append(pkt_info)
+        prev_packet_time = current_time
+
+    return valid_packets
+
 
 def get_os_label_from_ip(ip_address, ip_mapping=None):
     """
@@ -251,6 +299,10 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
     """
     Process PCAP file and extract flow-level features
 
+    Applies NetFlow/IPFIX-style flow timeouts:
+    - IDLE timeout (15s): Flow ends if no packets for 15 seconds
+    - ACTIVE timeout (60s): Flow ends after 60 seconds from start
+
     Args:
         pcap_path: Path to PCAP file
         filter_mode: 'syn_required' (default), 'tls_only', or 'all'
@@ -267,6 +319,7 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
         print("="*70)
         print(f"\nInput:  {pcap_path}")
         print(f"Filter: {filter_mode}")
+        print(f"Flow Timeouts: IDLE={FLOW_IDLE_TIMEOUT}s, ACTIVE={FLOW_ACTIVE_TIMEOUT}s")
         if ip_mapping:
             print(f"IP Filter: {len(ip_mapping)} specific SOURCE IPs (flows initiated by)")
             for ip, label in ip_mapping.items():
@@ -296,22 +349,45 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
             ip_layer = pkt[IP] if pkt.haslayer(IP) else pkt[IPv6]
             tcp_layer = pkt[TCP]
 
-            # Create flow key (5-tuple)
-            # Normalize direction: smaller IP/port first
-            src_ip = ip_layer.src
-            dst_ip = ip_layer.dst
-            src_port = tcp_layer.sport
-            dst_port = tcp_layer.dport
+            # Get actual packet IPs/ports (before normalization)
+            pkt_src_ip = ip_layer.src
+            pkt_dst_ip = ip_layer.dst
+            pkt_src_port = tcp_layer.sport
+            pkt_dst_port = tcp_layer.dport
 
-            # Normalize flow direction
-            if (src_ip, src_port) > (dst_ip, dst_port):
-                src_ip, dst_ip = dst_ip, src_ip
-                src_port, dst_port = dst_port, src_port
-                direction = 'backward'
+            # If filtering by IP mapping, check which IP is the "client" (Windows machine)
+            # and create flow key with client as src, server as dst (no normalization)
+            if ip_mapping:
+                # Check if source IP is a Windows machine
+                if pkt_src_ip in ip_mapping:
+                    # Packet FROM Windows machine (client → server)
+                    flow_key = (pkt_src_ip, pkt_dst_ip, pkt_src_port, pkt_dst_port, 6)
+                    direction = 'forward'
+                # Check if destination IP is a Windows machine
+                elif pkt_dst_ip in ip_mapping:
+                    # Packet TO Windows machine (server → client)
+                    # Reverse the flow key so Windows IP is always src
+                    flow_key = (pkt_dst_ip, pkt_src_ip, pkt_dst_port, pkt_src_port, 6)
+                    direction = 'backward'
+                else:
+                    # Neither IP is in mapping - skip this packet entirely
+                    continue
             else:
-                direction = 'forward'
+                # No IP mapping - use standard normalization (alphabetical)
+                src_ip = pkt_src_ip
+                dst_ip = pkt_dst_ip
+                src_port = pkt_src_port
+                dst_port = pkt_dst_port
 
-            flow_key = (src_ip, dst_ip, src_port, dst_port, 6)  # 6 = TCP
+                # Normalize flow direction: smaller IP/port first
+                if (src_ip, src_port) > (dst_ip, dst_port):
+                    src_ip, dst_ip = dst_ip, src_ip
+                    src_port, dst_port = dst_port, src_port
+                    direction = 'backward'
+                else:
+                    direction = 'forward'
+
+                flow_key = (src_ip, dst_ip, src_port, dst_port, 6)  # 6 = TCP
 
             flows[flow_key].append({
                 'packet': pkt,
@@ -336,14 +412,13 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
     for flow_key, flow_packets in tqdm(flows.items(), desc="Extracting features", disable=not verbose):
         src_ip, dst_ip, src_port, dst_port, proto = flow_key
 
-        # Filter by IP mapping if provided
+        # Get OS label from IP mapping or filename
         if ip_mapping:
-            # Only check if SOURCE IP is in the mapping (flows initiated by these IPs)
-            # We want to capture SYN packets and TLS ClientHello sent by these machines
+            # When using IP mapping, src_ip is always the Windows machine IP
+            # (due to flow key construction in packet processing above)
             os_label = get_os_label_from_ip(src_ip, ip_mapping)
-
-            # Skip flow if source IP is not in the mapping
             if not os_label:
+                # This shouldn't happen anymore since we filter at packet level
                 filtered_no_ip_match += 1
                 continue
         else:
@@ -351,6 +426,10 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
 
         # Sort packets by timestamp
         flow_packets = sorted(flow_packets, key=lambda x: x['timestamp'])
+
+        # Apply flow timeouts (idle and active)
+        # This mimics NetFlow/IPFIX behavior and matches Masaryk dataset
+        flow_packets = apply_flow_timeouts(flow_packets)
 
         # Find SYN packet
         syn_packet = None
@@ -384,6 +463,14 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
         first_pkt = flow_packets[0]['packet']
         ip_layer = first_pkt[IP] if first_pkt.haslayer(IP) else first_pkt[IPv6]
 
+        # Aggregate ALL TCP flags seen across the entire flow (matches Masaryk)
+        # This gives us flags like ---AP-SF (ACK, PSH, SYN, FIN) instead of just ------S-
+        all_tcp_flags = 0
+        for pkt_info in flow_packets:
+            pkt = pkt_info['packet']
+            if pkt.haslayer(TCP):
+                all_tcp_flags |= pkt[TCP].flags
+
         # TCP features from SYN packet (if available)
         if syn_packet:
             tcp_syn = syn_packet[TCP]
@@ -392,7 +479,7 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
             feature_dict['tcp_syn_size'] = len(tcp_syn)
             feature_dict['tcp_win_size'] = tcp_syn.window
             feature_dict['tcp_syn_ttl'] = ip_syn.ttl if hasattr(ip_syn, 'ttl') else ip_syn.hlim
-            feature_dict['tcp_flags_a'] = tcp_flags_to_string(tcp_syn.flags)
+            feature_dict['tcp_flags_a'] = tcp_flags_to_string(all_tcp_flags)  # Use aggregated flags
             feature_dict['syn_ack_flag'] = 1
 
             # TCP options
@@ -406,7 +493,7 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
             feature_dict['tcp_syn_size'] = None
             feature_dict['tcp_win_size'] = None
             feature_dict['tcp_syn_ttl'] = None
-            feature_dict['tcp_flags_a'] = None
+            feature_dict['tcp_flags_a'] = tcp_flags_to_string(all_tcp_flags) if all_tcp_flags > 0 else None
             feature_dict['syn_ack_flag'] = 0
             feature_dict['tcp_option_window_scale_forward'] = None
             feature_dict['tcp_option_selective_ack_permitted_forward'] = None
