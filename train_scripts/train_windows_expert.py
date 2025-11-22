@@ -201,7 +201,7 @@ def apply_adasyn(X, y, verbose=True):
             print(f"    {label}: {count:,}")
 
     try:
-        adasyn = ADASYN(random_state=42, n_neighbors=5)
+        adasyn = ADASYN(random_state=42, n_neighbors=5, sampling_strategy='minority')
         X_resampled, y_resampled = adasyn.fit_resample(X, y)
 
         if verbose:
@@ -244,12 +244,25 @@ def train_windows_expert(input_path='data/processed/nprint_windows_flows.csv',
         accuracy: Test accuracy
     """
 
+    # Create timestamped directories
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_name = f"WindowsExpert_{timestamp}"
+
+    model_output_dir = os.path.join(output_dir, run_name)
+    results_output_dir = os.path.join(results_dir, run_name)
+
+    os.makedirs(model_output_dir, exist_ok=True)
+    os.makedirs(results_output_dir, exist_ok=True)
+
     print("="*80)
     print("WINDOWS EXPERT MODEL - TRAINING")
     print("="*80)
     print(f"\nTask: Windows version classification (7, 8, 10, Vista)")
     print(f"Algorithm: XGBoost with ADASYN + class weights")
     print(f"Input: {input_path}")
+    print(f"\nOutput directories:")
+    print(f"  Models: {model_output_dir}")
+    print(f"  Results: {results_output_dir}")
 
     # Load data
     if verbose:
@@ -453,29 +466,26 @@ def train_windows_expert(input_path='data/processed/nprint_windows_flows.csv',
     if verbose:
         print(f"\n[8/8] Saving model and artifacts...")
 
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(results_dir, exist_ok=True)
-
     # Save model
-    model_path = os.path.join(output_dir, 'windows_expert.pkl')
+    model_path = os.path.join(model_output_dir, 'windows_expert.pkl')
     with open(model_path, 'wb') as f:
         pickle.dump(model, f)
     print(f"  ✓ Saved model: {model_path}")
 
     # Save feature names
-    feature_names_path = os.path.join(output_dir, 'windows_expert_feature_names.pkl')
+    feature_names_path = os.path.join(model_output_dir, 'windows_expert_feature_names.pkl')
     with open(feature_names_path, 'wb') as f:
         pickle.dump(feature_names, f)
     print(f"  ✓ Saved feature names: {feature_names_path}")
 
     # Save label encoder
-    label_encoder_path = os.path.join(output_dir, 'windows_expert_label_encoder.pkl')
+    label_encoder_path = os.path.join(model_output_dir, 'windows_expert_label_encoder.pkl')
     with open(label_encoder_path, 'wb') as f:
         pickle.dump(label_encoder, f)
     print(f"  ✓ Saved label encoder: {label_encoder_path}")
 
     # Save categorical encoders
-    cat_encoders_path = os.path.join(output_dir, 'windows_expert_categorical_encoders.pkl')
+    cat_encoders_path = os.path.join(model_output_dir, 'windows_expert_categorical_encoders.pkl')
     with open(cat_encoders_path, 'wb') as f:
         pickle.dump(categorical_encoders, f)
     print(f"  ✓ Saved categorical encoders: {cat_encoders_path}")
@@ -490,11 +500,11 @@ def train_windows_expert(input_path='data/processed/nprint_windows_flows.csv',
         'classes': class_names,
         'test_accuracy': float(accuracy),
         'used_adasyn': use_adasyn,
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': timestamp,
         'feature_importance': importance_df.head(15).to_dict('records'),
     }
 
-    eval_path = os.path.join(results_dir, 'windows_expert_evaluation.json')
+    eval_path = os.path.join(results_output_dir, 'windows_expert_evaluation.json')
     with open(eval_path, 'w') as f:
         json.dump(eval_results, f, indent=2)
     print(f"  ✓ Saved evaluation: {eval_path}")
@@ -507,7 +517,7 @@ def train_windows_expert(input_path='data/processed/nprint_windows_flows.csv',
     plt.ylabel('True Label')
     plt.xlabel('Predicted Label')
 
-    cm_path = os.path.join(results_dir, 'windows_expert_confusion_matrix.png')
+    cm_path = os.path.join(results_output_dir, 'windows_expert_confusion_matrix.png')
     plt.savefig(cm_path, dpi=150, bbox_inches='tight')
     print(f"  ✓ Saved confusion matrix: {cm_path}")
     plt.close()
@@ -520,7 +530,7 @@ def train_windows_expert(input_path='data/processed/nprint_windows_flows.csv',
     plt.title('Windows Expert Model - Feature Importance (Top 20)')
     plt.gca().invert_yaxis()
 
-    fi_path = os.path.join(results_dir, 'windows_expert_feature_importance.png')
+    fi_path = os.path.join(results_output_dir, 'windows_expert_feature_importance.png')
     plt.savefig(fi_path, dpi=150, bbox_inches='tight')
     print(f"  ✓ Saved feature importance: {fi_path}")
     plt.close()
@@ -528,7 +538,9 @@ def train_windows_expert(input_path='data/processed/nprint_windows_flows.csv',
     print("\n" + "="*80)
     print("TRAINING COMPLETE")
     print("="*80)
-    print(f"\nModel saved to: {model_path}")
+    print(f"\nRun: {run_name}")
+    print(f"Model directory: {model_output_dir}")
+    print(f"Results directory: {results_output_dir}")
     print(f"Test Accuracy: {accuracy*100:.2f}%")
 
     return model, accuracy
