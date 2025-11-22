@@ -608,7 +608,7 @@ def main():
                     print(f"    {cls_name:<15}: {count:>6,}")
 
             # Apply ADASYN
-            adasyn = ADASYN(random_state=args.random_state, n_jobs=-1)
+            adasyn = ADASYN(random_state=args.random_state)
             X_train, y_train = adasyn.fit_resample(X_train, y_train)
 
             # Show class distribution after ADASYN
