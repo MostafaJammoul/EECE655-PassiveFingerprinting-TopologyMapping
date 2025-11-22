@@ -416,7 +416,8 @@ def train_windows_expert(input_path='data/processed/nprint_windows_flows.csv',
     cm = confusion_matrix(y_test, y_pred)
 
     print(f"\nConfusion Matrix:")
-    print(f"{'True \\ Pred':<15}", end="")
+    header = "True \\ Pred"
+    print(f"{header:<15}", end="")
     for cls in class_names:
         print(f"{cls:<15}", end="")
     print()
