@@ -5,7 +5,7 @@ Preprocess Masaryk Dataset - Extract TCP SYN Flow Features for OS Family Classif
 Input:  data/raw/masaryk/flows_ground_truth_merged_anonymized.csv
 Output: data/processed/masaryk_processed.csv
 
-Extracts 24 TCP SYN flow-level features for OS family classification.
+Extracts 25 TCP SYN flow-level features for OS family classification.
 FILTERING: Only TCP flows (protocol=6) with SYN flag present are processed.
 """
 
@@ -81,9 +81,9 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     """
     Main preprocessing pipeline for Masaryk dataset
 
-    Extracts 24 features for OS family classification:
+    Extracts 25 features for OS family classification:
     - TCP fingerprinting: syn_size, win_size, syn_ttl, flags, options
-    - IP features: l3_proto, ttl, DF bit
+    - IP features: l3_proto, ip_tos, ttl, DF bit
     - TLS fingerprinting: ja3, ciphers, extensions, curves, version
     - Flow metadata: src_port, packet counts, total_bytes
 
@@ -103,7 +103,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     print(f"\nInput:  {raw_dir}/flows_ground_truth_merged_anonymized.csv")
     print(f"Output: {output_dir}/masaryk_processed.csv")
     print(f"\nFILTERING: Extracting only TCP flows with SYN flag present")
-    print(f"FEATURES: 24 core OS fingerprinting features")
+    print(f"FEATURES: 25 core OS fingerprinting features")
 
     raw_path = Path(raw_dir)
 
@@ -157,9 +157,9 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     # Position 107: packetTotalCountbackward
     # Position 110: synAckFlag
 
-    print(f"\n  Extracting 24 features:")
+    print(f"\n  Extracting 25 features:")
     print(f"    ✅ TCP: syn_size, win_size, syn_ttl, flags_a, syn_ack_flag, 4 TCP options")
-    print(f"    ✅ IP: l3_proto, maximum_ttl_forward, ipv4_dont_fragment_forward")
+    print(f"    ✅ IP: l3_proto, ip_tos, maximum_ttl_forward, ipv4_dont_fragment_forward")
     print(f"    ✅ TLS: ja3, ciphers, extensions, curves, version, handshake_type, key_length")
     print(f"    ✅ Flow: src_port, packet_count_forward, packet_count_backward, total_bytes")
     print(f"    ✅ Derived: initial_ttl")
@@ -286,9 +286,12 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                     l3_proto = None
                     max_ttl_forward = None
                     df_flag_forward = None
+                    ip_tos = None
                     try:
                         if len(fields) > 8 and fields[8]:
                             l3_proto = int(fields[8])
+                        if len(fields) > 21 and fields[21]:
+                            ip_tos = int(fields[21])
                         if len(fields) > 92 and fields[92]:
                             max_ttl_forward = int(fields[92])
                         if len(fields) > 94 and fields[94]:
@@ -342,7 +345,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                     # Derived feature: initial_ttl
                     initial_ttl = calculate_initial_ttl(tcp_syn_ttl) if tcp_syn_ttl else None
 
-                    # Create record with ONLY the 24 features + os_family
+                    # Create record with ONLY the 25 features + os_family
                     record = {
                         # TCP fingerprinting (9 features)
                         'tcp_syn_size': tcp_syn_size,
@@ -355,8 +358,9 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
                         'tcp_option_maximum_segment_size_forward': tcp_mss_forward,
                         'tcp_option_no_operation_forward': tcp_nop_forward,
 
-                        # IP features (3 features)
+                        # IP features (4 features)
                         'l3_proto': l3_proto,
+                        'ip_tos': ip_tos,
                         'maximum_ttl_forward': max_ttl_forward,
                         'ipv4_dont_fragment_forward': df_flag_forward,
 
@@ -441,7 +445,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
     if 'os_family' in df.columns:
         print(df['os_family'].value_counts())
 
-    print(f"\nFeature completeness check (24 features):")
+    print(f"\nFeature completeness check (25 features):")
 
     # TCP features
     print(f"\n  TCP Fingerprinting (9):")
@@ -457,8 +461,8 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
             print(f"    {status} {feat:<50}: {pct:>5.1f}%")
 
     # IP features
-    print(f"\n  IP Features (3):")
-    ip_features = ['l3_proto', 'maximum_ttl_forward', 'ipv4_dont_fragment_forward']
+    print(f"\n  IP Features (4):")
+    ip_features = ['l3_proto', 'ip_tos', 'maximum_ttl_forward', 'ipv4_dont_fragment_forward']
     for feat in ip_features:
         if feat in df.columns:
             pct = (df[feat].notna().sum() / len(df)) * 100
@@ -500,7 +504,7 @@ def preprocess_masaryk(raw_dir='data/raw/masaryk',
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Preprocess Masaryk dataset - extract 24 TCP SYN flow features for OS family classification'
+        description='Preprocess Masaryk dataset - extract 25 TCP SYN flow features for OS family classification'
     )
 
     parser.add_argument(
@@ -545,10 +549,10 @@ def main():
 
     print("\n✓ Success! Dataset ready for Model 1 (OS family classification) training.")
     print(f"\n" + "="*70)
-    print("EXTRACTED FEATURES SUMMARY (24 features)")
+    print("EXTRACTED FEATURES SUMMARY (25 features)")
     print("="*70)
     print(f"\n  ✅ TCP Fingerprinting (9): syn_size, win_size, syn_ttl, flags_a, syn_ack_flag, 4 TCP options")
-    print(f"  ✅ IP Features (3): l3_proto, maximum_ttl_forward, ipv4_dont_fragment_forward")
+    print(f"  ✅ IP Features (4): l3_proto, ip_tos, maximum_ttl_forward, ipv4_dont_fragment_forward")
     print(f"  ✅ Flow Metadata (4): src_port, packet counts (fwd/back), total_bytes")
     print(f"  ✅ TLS Fingerprinting (7): ja3, ciphers, extensions, curves, version, handshake, key_length")
     print(f"  ✅ Derived (1): initial_ttl")

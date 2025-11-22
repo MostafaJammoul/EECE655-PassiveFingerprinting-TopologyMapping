@@ -70,9 +70,10 @@ def select_features(df, verbose=True):
         'tcp_option_no_operation_forward',
     ]
 
-    # IP-level features (3 features)
+    # IP-level features (4 features)
     ip_features = [
         'l3_proto',  # L3 protocol
+        'ip_tos',  # Type of Service
         'maximum_ttl_forward',  # Maximum TTL observed forward
         'ipv4_dont_fragment_forward',  # Don't Fragment flag forward
     ]
@@ -101,7 +102,7 @@ def select_features(df, verbose=True):
         'initial_ttl',  # Estimated initial TTL (64=Linux/Mac, 128=Windows)
     ]
 
-    # Combine all 24 features
+    # Combine all 25 features
     all_features = tcp_features + ip_features + flow_features + tls_features + derived_features
 
     # Select only features that exist in the dataframe
