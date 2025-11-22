@@ -54,71 +54,55 @@ def select_features(df, verbose=True):
     for OS family fingerprinting.
     """
 
-    # Core TCP fingerprinting features (CRITICAL for OS identification!)
+    # Core TCP fingerprinting features (9 features)
     tcp_features = [
         # Basic TCP features
         'tcp_syn_size',
-        'tcp_win_size',  # Added alias for tcp_window_size
-        'tcp_syn_ttl',  # TCP SYN TTL value
+        'tcp_win_size',
+        'tcp_syn_ttl',
         'tcp_flags_a',  # TCP flags string (e.g., "---AP-SF") - requires encoding
         'syn_ack_flag',  # SYN-ACK flag indicator
 
-        # TCP Options (CRITICAL - Different OSes have unique patterns)
-        'tcp_option_window_scale_forward',  # NEW: HIGH importance
-        'tcp_option_window_scale_backward',  # NEW: HIGH importance
-        'tcp_option_maximum_segment_size_forward',  # NEW: HIGH importance
-        'tcp_option_maximum_segment_size_backward',  # NEW: HIGH importance
-        'tcp_option_selective_ack_permitted_forward',  # NEW: MEDIUM importance
-        'tcp_option_selective_ack_permitted_backward',  # NEW: MEDIUM importance
-        # 'tcp_timestamp_forward',  # REMOVED - 0.00% availability in Masaryk
-        # 'tcp_timestamp_backward',  # REMOVED - 0.00% availability in Masaryk
-        'tcp_option_no_operation_forward',  # NEW: LOW importance
-        'tcp_option_no_operation_backward',  # NEW: LOW importance
+        # TCP Options - Forward direction only (Different OSes have unique patterns)
+        'tcp_option_window_scale_forward',
+        'tcp_option_selective_ack_permitted_forward',
+        'tcp_option_maximum_segment_size_forward',
+        'tcp_option_no_operation_forward',
     ]
 
-    # IP-level features (ENHANCED with critical discriminators)
+    # IP-level features (3 features)
     ip_features = [
-        'initial_ttl',  # Estimated initial TTL (64=Linux/Mac, 128=Windows)
-        'ipv4_dont_fragment_forward',  # Don't Fragment flag forward
-        'ipv4_dont_fragment_backward',  # Don't Fragment flag backward
-        'ip_tos',  # Type of Service
-        'maximum_ttl_forward',  # Maximum TTL observed forward
-        'maximum_ttl_backward',  # Maximum TTL observed backward
         'l3_proto',  # L3 protocol
-        'l4_proto',  # L4 protocol
+        'maximum_ttl_forward',  # Maximum TTL observed forward
+        'ipv4_dont_fragment_forward',  # Don't Fragment flag forward
     ]
 
-    # Flow-level behavioral features
+    # Flow metadata (4 features)
     flow_features = [
-        'bytes_a',  # Total bytes in direction A
-        'packets_a',  # Total packets in direction A
+        'src_port',  # Ephemeral port
         'packet_total_count_forward',  # Packet count forward
         'packet_total_count_backward',  # Packet count backward
-        'total_bytes',  # Total bytes (derived feature)
+        'total_bytes',  # Total flow volume
     ]
 
-    # Port-based features (some services are OS-specific)
-    port_features = [
-        'src_port',
-        'dst_port',
-    ]
-
-    # NPM timing features - REMOVED (not available in CESNET, not needed for deployment)
-    # npm_features = []
-
-    # TLS fingerprinting features (string features - require encoding)
+    # TLS fingerprinting features (7 features - require encoding)
     tls_features = [
-        'tls_handshake_type',
-        'tls_client_version',
+        'tls_ja3_fingerprint',
         'tls_cipher_suites',
         'tls_extension_types',
         'tls_elliptic_curves',
+        'tls_client_version',
+        'tls_handshake_type',
         'tls_client_key_length',
-        'tls_ja3_fingerprint',
     ]
 
-    # Combine all features (NPM features excluded - not available in CESNET)
-    all_features = tcp_features + ip_features + flow_features + port_features + tls_features
+    # Derived features (1 feature)
+    derived_features = [
+        'initial_ttl',  # Estimated initial TTL (64=Linux/Mac, 128=Windows)
+    ]
+
+    # Combine all 24 features
+    all_features = tcp_features + ip_features + flow_features + tls_features + derived_features
 
     # Select only features that exist in the dataframe
     available_features = [f for f in all_features if f in df.columns]
@@ -211,9 +195,12 @@ def handle_missing_values(X, strategy='median', verbose=True):
 # ============================================================================
 
 def train_xgboost_model(X_train, y_train, X_val, y_val,
-                        class_weights=None, verbose=True):
+                        class_weights=None, hyperparams=None, verbose=True):
     """
     Train XGBoost classifier with optimized hyperparameters
+
+    Args:
+        hyperparams: Optional dict of hyperparameters to override defaults
 
     XGBoost is chosen for Model 1 because:
     - Handles large datasets well
@@ -244,7 +231,8 @@ def train_xgboost_model(X_train, y_train, X_val, y_val,
     sample_weights = np.array([class_weights[y] for y in y_train])
 
     # XGBoost parameters optimized for OS family classification
-    params = {
+    # Default parameters (can be overridden by hyperparams argument)
+    default_params = {
         'objective': 'multi:softprob',
         'num_class': len(np.unique(y_train)),
         'max_depth': 8,  # Prevent overfitting
@@ -261,6 +249,24 @@ def train_xgboost_model(X_train, y_train, X_val, y_val,
         'random_state': 42,
         'n_jobs': -1,
     }
+
+    # Override with custom hyperparameters if provided
+    if hyperparams is not None:
+        if verbose:
+            print(f"\n  Using custom hyperparameters from file")
+        default_params.update(hyperparams)
+        # Ensure these critical parameters are always set
+        default_params['objective'] = 'multi:softprob'
+        default_params['num_class'] = len(np.unique(y_train))
+        default_params['eval_metric'] = 'mlogloss'
+        if 'early_stopping_rounds' not in default_params:
+            default_params['early_stopping_rounds'] = 20
+        if 'random_state' not in default_params:
+            default_params['random_state'] = 42
+        if 'n_jobs' not in default_params:
+            default_params['n_jobs'] = -1
+
+    params = default_params
 
     if verbose:
         print(f"\n  XGBoost parameters:")
@@ -473,6 +479,13 @@ def main():
     )
 
     parser.add_argument(
+        '--hyperparams-file',
+        type=str,
+        default=None,
+        help='Path to JSON file with hyperparameters (from tune_hyperparameters.py)'
+    )
+
+    parser.add_argument(
         '--quiet',
         action='store_true',
         help='Suppress verbose output'
@@ -626,12 +639,32 @@ def main():
             print(f"  Install with: pip install imbalanced-learn")
             sys.exit(1)
 
+    # Load hyperparameters from file if provided
+    hyperparams = None
+    if args.hyperparams_file:
+        if verbose:
+            print(f"\n[3.6/6] Loading hyperparameters from file...")
+        try:
+            import json
+            with open(args.hyperparams_file, 'r') as f:
+                hyperparams = json.load(f)
+            if verbose:
+                print(f"  ✓ Loaded hyperparameters from: {args.hyperparams_file}")
+                print(f"  Parameters: {json.dumps(hyperparams, indent=4)}")
+        except FileNotFoundError:
+            print(f"  ✗ ERROR: Hyperparameters file not found: {args.hyperparams_file}")
+            print(f"  Using default hyperparameters instead.")
+        except json.JSONDecodeError as e:
+            print(f"  ✗ ERROR: Invalid JSON in hyperparameters file: {e}")
+            print(f"  Using default hyperparameters instead.")
+
     # Train model
     if verbose:
         print(f"\n[4/6] Training model...")
 
     model, class_weights = train_xgboost_model(
         X_train, y_train, X_val, y_val,
+        hyperparams=hyperparams,
         verbose=verbose
     )
 
