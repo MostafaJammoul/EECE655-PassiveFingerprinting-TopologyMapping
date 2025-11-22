@@ -464,6 +464,17 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
             syn_dst_ip = syn_packet_info['pkt_dst_ip']
             syn_dst_port = syn_packet_info['pkt_dst_port']
 
+            # CRITICAL FILTER: When using IP mapping, ONLY keep flows where
+            # the Windows machine (mapped IP) sent the SYN packet (client role)
+            # Skip flows where Windows machine is the SYN receiver (server role)
+            if ip_mapping:
+                if syn_src_ip not in ip_mapping:
+                    # SYN was sent by external host TO Windows machine
+                    # This means Windows is acting as SERVER, not client
+                    # Skip this flow per user's requirement
+                    filtered_no_ip_match += 1
+                    continue
+
             # Assign direction to all packets based on SYN direction
             for pkt_info in flow_packets:
                 if (pkt_info['pkt_src_ip'] == syn_src_ip and
@@ -474,7 +485,17 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
                 else:
                     pkt_info['direction'] = 'backward'
         else:
-            # No pure SYN found - use flow key to determine direction
+            # No pure SYN found - when using IP mapping, we CANNOT determine
+            # if Windows machine was the client or server without a SYN packet
+            # User requirement: ONLY keep flows initiated BY Windows machines
+            # So skip flows without pure SYN when filtering by IP
+            if ip_mapping:
+                # No pure SYN found AND we're filtering by IP mapping
+                # Cannot confirm Windows initiated this flow - skip it
+                filtered_no_syn += 1
+                continue
+
+            # No IP mapping - use flow key to determine direction
             # Flow key has client IP first (from flow aggregation logic)
             # Packets matching flow key order are forward, opposite are backward
             for pkt_info in flow_packets:
