@@ -435,10 +435,10 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
         # This mimics NetFlow/IPFIX behavior and matches Masaryk dataset
         flow_packets = apply_flow_timeouts(flow_packets)
 
-        # Find SYN packet (first packet with SYN flag set, preferably without ACK)
+        # Find SYN packet - ONLY pure SYN (client initiator), NOT SYN-ACK
         syn_packet = None
         syn_packet_info = None
-        has_syn = False
+        has_pure_syn = False
 
         for pkt_info in flow_packets:
             pkt = pkt_info['packet']
@@ -449,26 +449,16 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
                 if (flags & 0x02) and not (flags & 0x10):  # SYN=1, ACK=0
                     syn_packet = pkt
                     syn_packet_info = pkt_info
-                    has_syn = True
+                    has_pure_syn = True
                     break
 
-        # If no pure SYN found, accept SYN+ACK or any SYN
-        if not has_syn:
-            for pkt_info in flow_packets:
-                pkt = pkt_info['packet']
-                if pkt.haslayer(TCP):
-                    tcp_layer = pkt[TCP]
-                    flags = tcp_layer.flags
-                    if flags & 0x02:  # Any SYN
-                        syn_packet = pkt
-                        syn_packet_info = pkt_info
-                        has_syn = True
-                        break
-
-        # Determine forward direction based on SYN packet
-        # Forward = direction of SYN packet (client → server)
+        # Determine forward direction based on PURE SYN packet (client initiator)
+        # Forward = direction of pure SYN packet (client → server)
         # Backward = opposite direction (server → client)
-        if has_syn and syn_packet_info:
+        #
+        # IMPORTANT: We do NOT use SYN-ACK to determine direction!
+        # SYN-ACK is a server response (backward direction), not client initiator
+        if has_pure_syn and syn_packet_info:
             syn_src_ip = syn_packet_info['pkt_src_ip']
             syn_src_port = syn_packet_info['pkt_src_port']
             syn_dst_ip = syn_packet_info['pkt_dst_ip']
@@ -484,7 +474,8 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
                 else:
                     pkt_info['direction'] = 'backward'
         else:
-            # No SYN packet - use flow key to determine direction
+            # No pure SYN found - use flow key to determine direction
+            # Flow key has client IP first (from flow aggregation logic)
             # Packets matching flow key order are forward, opposite are backward
             for pkt_info in flow_packets:
                 if (pkt_info['pkt_src_ip'] == src_ip and
@@ -494,6 +485,19 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
                     pkt_info['direction'] = 'forward'
                 else:
                     pkt_info['direction'] = 'backward'
+
+        # Check if we have any SYN packet (including SYN-ACK) for filtering
+        has_syn = has_pure_syn
+        if not has_syn:
+            for pkt_info in flow_packets:
+                pkt = pkt_info['packet']
+                if pkt.haslayer(TCP):
+                    tcp_layer = pkt[TCP]
+                    flags = tcp_layer.flags
+                    if flags & 0x02:  # Any SYN (for filtering purposes only)
+                        syn_packet = pkt  # Keep for TCP feature extraction
+                        has_syn = True
+                        break
 
         # Apply filtering
         if filter_mode == 'syn_required' and not has_syn:
