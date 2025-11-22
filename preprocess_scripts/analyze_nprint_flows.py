@@ -349,22 +349,45 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
             ip_layer = pkt[IP] if pkt.haslayer(IP) else pkt[IPv6]
             tcp_layer = pkt[TCP]
 
-            # Create flow key (5-tuple)
-            # Normalize direction: smaller IP/port first
-            src_ip = ip_layer.src
-            dst_ip = ip_layer.dst
-            src_port = tcp_layer.sport
-            dst_port = tcp_layer.dport
+            # Get actual packet IPs/ports (before normalization)
+            pkt_src_ip = ip_layer.src
+            pkt_dst_ip = ip_layer.dst
+            pkt_src_port = tcp_layer.sport
+            pkt_dst_port = tcp_layer.dport
 
-            # Normalize flow direction
-            if (src_ip, src_port) > (dst_ip, dst_port):
-                src_ip, dst_ip = dst_ip, src_ip
-                src_port, dst_port = dst_port, src_port
-                direction = 'backward'
+            # If filtering by IP mapping, check which IP is the "client" (Windows machine)
+            # and create flow key with client as src, server as dst (no normalization)
+            if ip_mapping:
+                # Check if source IP is a Windows machine
+                if pkt_src_ip in ip_mapping:
+                    # Packet FROM Windows machine (client → server)
+                    flow_key = (pkt_src_ip, pkt_dst_ip, pkt_src_port, pkt_dst_port, 6)
+                    direction = 'forward'
+                # Check if destination IP is a Windows machine
+                elif pkt_dst_ip in ip_mapping:
+                    # Packet TO Windows machine (server → client)
+                    # Reverse the flow key so Windows IP is always src
+                    flow_key = (pkt_dst_ip, pkt_src_ip, pkt_dst_port, pkt_src_port, 6)
+                    direction = 'backward'
+                else:
+                    # Neither IP is in mapping - skip this packet entirely
+                    continue
             else:
-                direction = 'forward'
+                # No IP mapping - use standard normalization (alphabetical)
+                src_ip = pkt_src_ip
+                dst_ip = pkt_dst_ip
+                src_port = pkt_src_port
+                dst_port = pkt_dst_port
 
-            flow_key = (src_ip, dst_ip, src_port, dst_port, 6)  # 6 = TCP
+                # Normalize flow direction: smaller IP/port first
+                if (src_ip, src_port) > (dst_ip, dst_port):
+                    src_ip, dst_ip = dst_ip, src_ip
+                    src_port, dst_port = dst_port, src_port
+                    direction = 'backward'
+                else:
+                    direction = 'forward'
+
+                flow_key = (src_ip, dst_ip, src_port, dst_port, 6)  # 6 = TCP
 
             flows[flow_key].append({
                 'packet': pkt,
@@ -389,14 +412,13 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
     for flow_key, flow_packets in tqdm(flows.items(), desc="Extracting features", disable=not verbose):
         src_ip, dst_ip, src_port, dst_port, proto = flow_key
 
-        # Filter by IP mapping if provided
+        # Get OS label from IP mapping or filename
         if ip_mapping:
-            # Only check if SOURCE IP is in the mapping (flows initiated by these IPs)
-            # We want to capture SYN packets and TLS ClientHello sent by these machines
+            # When using IP mapping, src_ip is always the Windows machine IP
+            # (due to flow key construction in packet processing above)
             os_label = get_os_label_from_ip(src_ip, ip_mapping)
-
-            # Skip flow if source IP is not in the mapping
             if not os_label:
+                # This shouldn't happen anymore since we filter at packet level
                 filtered_no_ip_match += 1
                 continue
         else:
@@ -441,6 +463,14 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
         first_pkt = flow_packets[0]['packet']
         ip_layer = first_pkt[IP] if first_pkt.haslayer(IP) else first_pkt[IPv6]
 
+        # Aggregate ALL TCP flags seen across the entire flow (matches Masaryk)
+        # This gives us flags like ---AP-SF (ACK, PSH, SYN, FIN) instead of just ------S-
+        all_tcp_flags = 0
+        for pkt_info in flow_packets:
+            pkt = pkt_info['packet']
+            if pkt.haslayer(TCP):
+                all_tcp_flags |= pkt[TCP].flags
+
         # TCP features from SYN packet (if available)
         if syn_packet:
             tcp_syn = syn_packet[TCP]
@@ -449,7 +479,7 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
             feature_dict['tcp_syn_size'] = len(tcp_syn)
             feature_dict['tcp_win_size'] = tcp_syn.window
             feature_dict['tcp_syn_ttl'] = ip_syn.ttl if hasattr(ip_syn, 'ttl') else ip_syn.hlim
-            feature_dict['tcp_flags_a'] = tcp_flags_to_string(tcp_syn.flags)
+            feature_dict['tcp_flags_a'] = tcp_flags_to_string(all_tcp_flags)  # Use aggregated flags
             feature_dict['syn_ack_flag'] = 1
 
             # TCP options
@@ -463,7 +493,7 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
             feature_dict['tcp_syn_size'] = None
             feature_dict['tcp_win_size'] = None
             feature_dict['tcp_syn_ttl'] = None
-            feature_dict['tcp_flags_a'] = None
+            feature_dict['tcp_flags_a'] = tcp_flags_to_string(all_tcp_flags) if all_tcp_flags > 0 else None
             feature_dict['syn_ack_flag'] = 0
             feature_dict['tcp_option_window_scale_forward'] = None
             feature_dict['tcp_option_selective_ack_permitted_forward'] = None
