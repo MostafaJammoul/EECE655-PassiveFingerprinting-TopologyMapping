@@ -1,0 +1,190 @@
+{
+  "timestamp": "2025-11-22T02:10:35.868812",
+  "model": "XGBoost",
+  "task": "OS Family Classification",
+  "dataset": "Masaryk",
+  "metrics": {
+    "accuracy": 0.9751307115253467,
+    "precision": 0.9754084241598329,
+    "recall": 0.9751307115253467,
+    "f1_score": 0.9752284884222765
+  },
+  "per_class_metrics": {
+    "Android": {
+      "precision": 0.9645054424988169,
+      "recall": 0.9902818270165209,
+      "f1_score": 0.9772236873651402,
+      "support": 2058
+    },
+    "Linux": {
+      "precision": 0.8472998137802608,
+      "recall": 0.8617424242424242,
+      "f1_score": 0.8544600938967136,
+      "support": 528
+    },
+    "Other": {
+      "precision": 0.9907757805108799,
+      "recall": 0.984951798730308,
+      "f1_score": 0.9878552057540384,
+      "support": 8506
+    },
+    "Windows": {
+      "precision": 0.9854945604601726,
+      "recall": 0.9765799256505576,
+      "f1_score": 0.9810169913487272,
+      "support": 8070
+    },
+    "iOS": {
+      "precision": 0.9627984453081622,
+      "recall": 0.9807692307692307,
+      "f1_score": 0.9717007565144298,
+      "support": 1768
+    },
+    "macOS": {
+      "precision": 0.8817598533455545,
+      "recall": 0.9032863849765258,
+      "f1_score": 0.8923933209647495,
+      "support": 1065
+    }
+  },
+  "confusion_matrix": [
+    [
+      2038,
+      3,
+      11,
+      3,
+      2,
+      1
+    ],
+    [
+      11,
+      455,
+      19,
+      30,
+      0,
+      13
+    ],
+    [
+      37,
+      26,
+      8378,
+      44,
+      11,
+      10
+    ],
+    [
+      23,
+      41,
+      45,
+      7881,
+      5,
+      75
+    ],
+    [
+      1,
+      1,
+      1,
+      1,
+      1734,
+      30
+    ],
+    [
+      3,
+      11,
+      2,
+      38,
+      49,
+      962
+    ]
+  ],
+  "class_names": [
+    "Android",
+    "Linux",
+    "Other",
+    "Windows",
+    "iOS",
+    "macOS"
+  ],
+  "feature_importance": [
+    {
+      "feature": "tcp_syn_size",
+      "importance": 0.1788945347070694
+    },
+    {
+      "feature": "initial_ttl",
+      "importance": 0.11817022413015366
+    },
+    {
+      "feature": "dst_port",
+      "importance": 0.10358227789402008
+    },
+    {
+      "feature": "tcp_option_window_scale_forward",
+      "importance": 0.08286510407924652
+    },
+    {
+      "feature": "tcp_option_window_scale_backward",
+      "importance": 0.0693003311753273
+    },
+    {
+      "feature": "tcp_win_size",
+      "importance": 0.0597221739590168
+    },
+    {
+      "feature": "tls_extension_types",
+      "importance": 0.04042141139507294
+    },
+    {
+      "feature": "tcp_option_selective_ack_permitted_backward",
+      "importance": 0.03830791264772415
+    },
+    {
+      "feature": "tls_cipher_suites",
+      "importance": 0.03694278374314308
+    },
+    {
+      "feature": "tls_ja3_fingerprint",
+      "importance": 0.030242202803492546
+    },
+    {
+      "feature": "tcp_flags_a",
+      "importance": 0.02739875763654709
+    },
+    {
+      "feature": "tcp_option_selective_ack_permitted_forward",
+      "importance": 0.02408727817237377
+    },
+    {
+      "feature": "tcp_syn_ttl",
+      "importance": 0.023291459307074547
+    },
+    {
+      "feature": "ipv4_dont_fragment_forward",
+      "importance": 0.023173846304416656
+    },
+    {
+      "feature": "maximum_ttl_forward",
+      "importance": 0.0204094797372818
+    },
+    {
+      "feature": "tls_elliptic_curves",
+      "importance": 0.01868271827697754
+    },
+    {
+      "feature": "total_bytes",
+      "importance": 0.018253648653626442
+    },
+    {
+      "feature": "tcp_option_no_operation_forward",
+      "importance": 0.014070042409002781
+    },
+    {
+      "feature": "tcp_option_maximum_segment_size_forward",
+      "importance": 0.010329761542379856
+    },
+    {
+      "feature": "tls_client_key_length",
+      "importance": 0.00902382843196392
+    }
+  ]
+}
