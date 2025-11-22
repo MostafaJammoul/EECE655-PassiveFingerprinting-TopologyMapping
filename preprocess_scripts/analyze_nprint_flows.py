@@ -202,6 +202,54 @@ WINDOWS_IP_MAPPING = {
     '192.168.10.15': 'Windows 10',    # Win 10, 64B
 }
 
+# Flow timeout settings (matches NetFlow/IPFIX behavior)
+FLOW_IDLE_TIMEOUT = 15.0   # seconds - flow ends if no packets for 15s
+FLOW_ACTIVE_TIMEOUT = 60.0  # seconds - flow ends after 60s from start
+
+
+def apply_flow_timeouts(flow_packets, idle_timeout=FLOW_IDLE_TIMEOUT,
+                       active_timeout=FLOW_ACTIVE_TIMEOUT):
+    """
+    Apply idle and active timeouts to flow packets
+
+    Mimics NetFlow/IPFIX flow export behavior:
+    - IDLE timeout: Flow ends if gap between packets > idle_timeout
+    - ACTIVE timeout: Flow ends after active_timeout from first packet
+
+    Args:
+        flow_packets: List of packet dicts with 'timestamp' key (sorted by time)
+        idle_timeout: Maximum idle time between packets (seconds)
+        active_timeout: Maximum total flow duration (seconds)
+
+    Returns:
+        Filtered list of packets within timeout constraints
+    """
+    if not flow_packets or len(flow_packets) == 0:
+        return flow_packets
+
+    # Get first packet timestamp (flow start)
+    flow_start_time = flow_packets[0]['timestamp']
+
+    # Filter packets based on timeouts
+    valid_packets = []
+    prev_packet_time = flow_start_time
+
+    for pkt_info in flow_packets:
+        current_time = pkt_info['timestamp']
+
+        # Check active timeout (time since flow start)
+        if current_time - flow_start_time > active_timeout:
+            break  # Flow exceeded active timeout
+
+        # Check idle timeout (time since last packet)
+        if current_time - prev_packet_time > idle_timeout:
+            break  # Flow exceeded idle timeout
+
+        valid_packets.append(pkt_info)
+        prev_packet_time = current_time
+
+    return valid_packets
+
 
 def get_os_label_from_ip(ip_address, ip_mapping=None):
     """
@@ -251,6 +299,10 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
     """
     Process PCAP file and extract flow-level features
 
+    Applies NetFlow/IPFIX-style flow timeouts:
+    - IDLE timeout (15s): Flow ends if no packets for 15 seconds
+    - ACTIVE timeout (60s): Flow ends after 60 seconds from start
+
     Args:
         pcap_path: Path to PCAP file
         filter_mode: 'syn_required' (default), 'tls_only', or 'all'
@@ -267,6 +319,7 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
         print("="*70)
         print(f"\nInput:  {pcap_path}")
         print(f"Filter: {filter_mode}")
+        print(f"Flow Timeouts: IDLE={FLOW_IDLE_TIMEOUT}s, ACTIVE={FLOW_ACTIVE_TIMEOUT}s")
         if ip_mapping:
             print(f"IP Filter: {len(ip_mapping)} specific SOURCE IPs (flows initiated by)")
             for ip, label in ip_mapping.items():
@@ -351,6 +404,10 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
 
         # Sort packets by timestamp
         flow_packets = sorted(flow_packets, key=lambda x: x['timestamp'])
+
+        # Apply flow timeouts (idle and active)
+        # This mimics NetFlow/IPFIX behavior and matches Masaryk dataset
+        flow_packets = apply_flow_timeouts(flow_packets)
 
         # Find SYN packet
         syn_packet = None
