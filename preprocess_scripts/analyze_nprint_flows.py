@@ -20,8 +20,24 @@ from datetime import datetime
 
 try:
     from scapy.all import rdpcap, TCP, IP, IPv6, Raw
-    from scapy.layers.tls.handshake import TLS, TLSClientHello
-    from scapy.layers.tls.extensions import TLS_Ext_SupportedGroups, TLS_Ext_ServerName
+    # Try multiple import paths for TLS (depends on scapy version)
+    try:
+        from scapy.layers.tls.record import TLS
+        from scapy.layers.tls.handshake import TLSClientHello
+        from scapy.layers.tls.extensions import TLS_Ext_SupportedGroups, TLS_Ext_ServerName
+    except ImportError:
+        try:
+            # Older scapy versions
+            from scapy.layers.ssl_tls import TLS, TLSClientHello
+            TLS_Ext_SupportedGroups = None
+            TLS_Ext_ServerName = None
+        except ImportError:
+            # Fallback - TLS parsing will be disabled
+            TLS = None
+            TLSClientHello = None
+            TLS_Ext_SupportedGroups = None
+            TLS_Ext_ServerName = None
+            print("WARNING: TLS layer not available in this scapy version. TLS features will be empty.")
 except ImportError:
     print("ERROR: scapy not installed")
     print("\nInstall with:")
@@ -109,6 +125,10 @@ def extract_tls_features(packet):
         'client_key_length': None
     }
 
+    # Skip TLS parsing if TLS layer not available
+    if TLS is None or TLSClientHello is None:
+        return tls_features
+
     try:
         if packet.haslayer(TLS):
             tls_layer = packet[TLS]
@@ -139,7 +159,7 @@ def extract_tls_features(packet):
                                     ext_types.append(f'{ext.type:04X}')
 
                                 # Elliptic curves
-                                if isinstance(ext, TLS_Ext_SupportedGroups):
+                                if TLS_Ext_SupportedGroups and isinstance(ext, TLS_Ext_SupportedGroups):
                                     if hasattr(ext, 'groups'):
                                         curves = [f'{g:04X}' for g in ext.groups]
 
