@@ -389,6 +389,19 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
     if verbose:
         print(f"  Found {len(flows):,} unique flows")
 
+        # DEBUG: Check first few flows for bidirectional packets
+        if ip_mapping:
+            print(f"\n  DEBUG: Checking first 3 flows for bidirectional packets...")
+            for i, (flow_key, pkts) in enumerate(list(flows.items())[:3]):
+                src_ip, dst_ip, src_port, dst_port, proto = flow_key
+                print(f"    Flow {i+1}: {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
+                print(f"      Total packets: {len(pkts)}")
+
+                # Count packets by actual direction (before SYN-based assignment)
+                client_to_server = sum(1 for p in pkts if p['pkt_src_ip'] == src_ip and p['pkt_src_port'] == src_port)
+                server_to_client = sum(1 for p in pkts if p['pkt_src_ip'] == dst_ip and p['pkt_src_port'] == dst_port)
+                print(f"      Client->Server: {client_to_server}, Server->Client: {server_to_client}")
+
     # Extract features from flows
     if verbose:
         print(f"\n[3/3] Extracting features from flows...")
@@ -573,8 +586,21 @@ def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose
         feature_dict['src_port'] = src_port
 
         # Packet counts
-        fwd_count = sum(1 for p in flow_packets if p['direction'] == 'forward')
-        bwd_count = sum(1 for p in flow_packets if p['direction'] == 'backward')
+        fwd_count = sum(1 for p in flow_packets if p.get('direction') == 'forward')
+        bwd_count = sum(1 for p in flow_packets if p.get('direction') == 'backward')
+
+        # DEBUG: Check if any packet is missing direction
+        missing_direction = sum(1 for p in flow_packets if 'direction' not in p)
+        if missing_direction > 0 and verbose:
+            print(f"  WARNING: {missing_direction} packets missing direction in flow {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
+
+        # DEBUG: Print first flow with backward packets
+        if bwd_count > 0 and verbose:
+            print(f"\n  DEBUG: Flow with backward packets found!")
+            print(f"    Flow: {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
+            print(f"    Forward: {fwd_count}, Backward: {bwd_count}")
+            print(f"    Sample backward packet: {[p for p in flow_packets if p.get('direction') == 'backward'][0]['pkt_src_ip']}:{[p for p in flow_packets if p.get('direction') == 'backward'][0]['pkt_src_port']}")
+
         feature_dict['packet_total_count_forward'] = fwd_count
         feature_dict['packet_total_count_backward'] = bwd_count
 
