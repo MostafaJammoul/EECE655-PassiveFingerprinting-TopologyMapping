@@ -172,6 +172,34 @@ def extract_tls_features(packet):
     return tls_features
 
 
+# Windows Expert Model IP-to-Label Mapping
+# Maps specific IP addresses to Windows version labels
+WINDOWS_IP_MAPPING = {
+    '192.168.10.9': 'Windows 7',      # Win 7 Pro, 64B
+    '192.168.10.5': 'Windows 8',      # Win 8.1, 64B (treated as Windows 8)
+    '192.168.10.8': 'Windows Vista',  # Win Vista, 64B
+    '192.168.10.14': 'Windows 10',    # Win 10, pro 32B
+    '192.168.10.15': 'Windows 10',    # Win 10, 64B
+}
+
+
+def get_os_label_from_ip(ip_address, ip_mapping=None):
+    """
+    Get OS label from IP address using IP mapping
+
+    Args:
+        ip_address: IP address string
+        ip_mapping: Dict mapping IPs to OS labels
+
+    Returns:
+        OS label string or None if not in mapping
+    """
+    if ip_mapping is None:
+        ip_mapping = WINDOWS_IP_MAPPING
+
+    return ip_mapping.get(ip_address)
+
+
 def extract_os_label_from_pcap(pcap_path):
     """
     Extract OS label from PCAP filename or metadata
@@ -199,13 +227,14 @@ def extract_os_label_from_pcap(pcap_path):
 # MAIN EXTRACTION
 # ============================================================================
 
-def process_pcap(pcap_path, filter_mode='syn_required', verbose=True):
+def process_pcap(pcap_path, filter_mode='syn_required', ip_mapping=None, verbose=True):
     """
     Process PCAP file and extract flow-level features
 
     Args:
         pcap_path: Path to PCAP file
         filter_mode: 'syn_required' (default), 'tls_only', or 'all'
+        ip_mapping: Dict mapping IPs to OS labels (filters flows to these IPs only)
         verbose: Print progress
 
     Returns:
@@ -218,6 +247,10 @@ def process_pcap(pcap_path, filter_mode='syn_required', verbose=True):
         print("="*70)
         print(f"\nInput:  {pcap_path}")
         print(f"Filter: {filter_mode}")
+        if ip_mapping:
+            print(f"IP Filter: {len(ip_mapping)} specific SOURCE IPs (flows initiated by)")
+            for ip, label in ip_mapping.items():
+                print(f"  {ip} -> {label}")
 
     # Load PCAP
     if verbose:
@@ -276,11 +309,25 @@ def process_pcap(pcap_path, filter_mode='syn_required', verbose=True):
     records = []
     filtered_no_syn = 0
     filtered_no_tls = 0
+    filtered_no_ip_match = 0
 
-    os_label = extract_os_label_from_pcap(pcap_path)
+    default_os_label = extract_os_label_from_pcap(pcap_path)
 
     for flow_key, flow_packets in tqdm(flows.items(), desc="Extracting features", disable=not verbose):
         src_ip, dst_ip, src_port, dst_port, proto = flow_key
+
+        # Filter by IP mapping if provided
+        if ip_mapping:
+            # Only check if SOURCE IP is in the mapping (flows initiated by these IPs)
+            # We want to capture SYN packets and TLS ClientHello sent by these machines
+            os_label = get_os_label_from_ip(src_ip, ip_mapping)
+
+            # Skip flow if source IP is not in the mapping
+            if not os_label:
+                filtered_no_ip_match += 1
+                continue
+        else:
+            os_label = default_os_label
 
         # Sort packets by timestamp
         flow_packets = sorted(flow_packets, key=lambda x: x['timestamp'])
@@ -413,6 +460,8 @@ def process_pcap(pcap_path, filter_mode='syn_required', verbose=True):
 
     if verbose:
         print(f"\n  Processed {len(flows):,} flows")
+        if ip_mapping:
+            print(f"  Filtered (IP not in mapping): {filtered_no_ip_match:,}")
         if filter_mode == 'syn_required':
             print(f"  Filtered (no SYN): {filtered_no_syn:,}")
         if filter_mode == 'tls_only':
@@ -478,6 +527,12 @@ def main():
     )
 
     parser.add_argument(
+        '--use-windows-ips',
+        action='store_true',
+        help='Filter to flows INITIATED by Windows expert model IPs (192.168.10.5/8/9/14/15)'
+    )
+
+    parser.add_argument(
         '--quiet',
         action='store_true',
         help='Suppress verbose output'
@@ -487,15 +542,25 @@ def main():
 
     verbose = not args.quiet
 
+    # Determine IP mapping
+    ip_mapping = None
+    if args.use_windows_ips:
+        ip_mapping = WINDOWS_IP_MAPPING
+        if verbose:
+            print(f"\n🎯 Using Windows Expert Model IP filtering (SOURCE IPs only)")
+            print(f"   Filtering to flows INITIATED by {len(ip_mapping)} specific IPs:")
+            for ip, label in ip_mapping.items():
+                print(f"     {ip} -> {label}")
+
     # Process PCAP
-    df = process_pcap(args.pcap, filter_mode=args.filter, verbose=verbose)
+    df = process_pcap(args.pcap, filter_mode=args.filter, ip_mapping=ip_mapping, verbose=verbose)
 
     if df is None or len(df) == 0:
         print("\nERROR: No flows extracted!")
         sys.exit(1)
 
-    # Override OS label if provided
-    if args.os_label:
+    # Override OS label if provided (only when not using IP mapping)
+    if args.os_label and not ip_mapping:
         df['os_family'] = args.os_label
 
     # Save to CSV
