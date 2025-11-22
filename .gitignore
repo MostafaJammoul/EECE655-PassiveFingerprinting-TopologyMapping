@@ -51,3 +51,6 @@ models/checkpoints/
 # OS
 .DS_Store
 Thumbs.db
+
+/results
+/models
