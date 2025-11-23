@@ -344,31 +344,33 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
                 print(f"    {cls}: {class_weights[i]:.3f}")
 
     # Train XGBoost model
-    # OPTIMIZED for Android: Deeper trees, more estimators, lower regularization
-    # (classes are very similar, need more aggressive fitting)
+    # TUNED hyperparameters from tune_android_hyperparameters.py
+    # Best CV F1-weighted: 0.7506
     if verbose:
-        print(f"\n[6/8] Training XGBoost model (optimized for Android)...")
+        print(f"\n[6/8] Training XGBoost model (tuned hyperparameters)...")
 
     model = xgb.XGBClassifier(
-        n_estimators=500,          # Increased from 200 (more trees to capture subtle patterns)
-        max_depth=12,              # Increased from 8 (deeper trees for complex interactions)
-        learning_rate=0.05,        # Decreased (slower learning = better generalization)
-        subsample=0.9,             # Increased from 0.8 (use more data per tree)
-        colsample_bytree=0.9,      # Increased from 0.8 (use more features)
-        min_child_weight=1,        # Decreased from 5 (allow finer splits)
-        gamma=0.0,                 # Decreased from 0.1 (less regularization)
-        reg_alpha=0.1,             # L1 regularization (feature selection)
-        reg_lambda=1.0,            # L2 regularization (prevent overfitting)
+        n_estimators=708,                      # Tuned (was 500)
+        max_depth=19,                          # Tuned (was 12) - much deeper!
+        learning_rate=0.070,                   # Tuned (was 0.05)
+        subsample=0.989,                       # Tuned (was 0.9)
+        colsample_bytree=0.904,                # Tuned (was 0.9)
+        min_child_weight=1,                    # Tuned (same as before)
+        gamma=0.475,                           # Tuned (was 0.0)
+        reg_alpha=0.434,                       # Tuned (was 0.1)
+        reg_lambda=1.618,                      # Tuned (was 1.0)
         random_state=42,
         n_jobs=-1,
         eval_metric='mlogloss'
     )
 
     if verbose:
-        print(f"  Hyperparameters optimized for similar classes:")
-        print(f"    - 500 estimators (vs default 200)")
-        print(f"    - max_depth=12 (vs default 8)")
-        print(f"    - Reduced regularization to capture subtle differences")
+        print(f"  Using optimized hyperparameters from tuning:")
+        print(f"    - n_estimators: 708 (was 500)")
+        print(f"    - max_depth: 19 (was 12)")
+        print(f"    - learning_rate: 0.070 (was 0.05)")
+        print(f"    - reg_alpha: 0.434, reg_lambda: 1.618")
+        print(f"    - Expected CV F1: 0.7506 (75.06%)")
 
     model.fit(
         X_train_resampled,
