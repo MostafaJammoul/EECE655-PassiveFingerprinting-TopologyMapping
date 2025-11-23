@@ -30,7 +30,7 @@ try:
         accuracy_score, precision_recall_fscore_support,
         confusion_matrix, classification_report
     )
-    from imblearn.over_sampling import SMOTE
+    from imblearn.over_sampling import SMOTE, BorderlineSMOTE
     from sklearn.utils.class_weight import compute_class_weight
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -157,12 +157,18 @@ def encode_categorical_features(X, encoders=None, verbose=True):
     return X_encoded, encoders
 
 
-def apply_smote(X, y, verbose=True):
+def apply_smote(X, y, verbose=True, balance_strategy='full', use_borderline=False):
     """
     Apply SMOTE oversampling for class imbalance
 
     SMOTE is more reliable than ADASYN for multiclass balancing because it always
     generates the requested number of synthetic samples (not adaptive).
+
+    Args:
+        balance_strategy: 'full' (balance to majority), 'moderate' (balance to median),
+                         'minimal' (balance smallest class only)
+        use_borderline: If True, use BorderlineSMOTE (focuses on boundary samples,
+                       less noise than regular SMOTE)
 
     CRITICAL: Imputes NaN values before SMOTE (SMOTE doesn't handle NaN)
     """
@@ -194,29 +200,46 @@ def apply_smote(X, y, verbose=True):
         else:
             X_imputed = X
 
-        # ITERATIVE SMOTE: Balance all classes by applying SMOTE multiple times
-        # SMOTE reliably generates synthetic samples for each minority class
-        # Each iteration balances the smallest minority class to the current majority
-
+        # SMOTE with configurable balancing strategy
         unique, counts = np.unique(y, return_counts=True)
         n_classes = len(unique)
+        class_counts = dict(zip(unique, counts))
+
+        # Determine target count based on strategy
+        if balance_strategy == 'full':
+            # Balance all to majority class
+            target_count = max(counts)
+            iterations = n_classes - 1
+        elif balance_strategy == 'moderate':
+            # Balance all to median count (less synthetic noise)
+            target_count = int(np.median(counts))
+            iterations = n_classes - 1
+        else:  # minimal
+            # Balance only smallest class to second smallest
+            target_count = sorted(counts)[1]
+            iterations = 1
 
         if verbose:
-            print(f"\n  Balancing strategy: Iterative SMOTE ({n_classes - 1} iterations)")
+            smote_type = "BorderlineSMOTE" if use_borderline else "SMOTE"
+            print(f"\n  Balancing strategy: {balance_strategy.upper()} with {smote_type}")
+            print(f"  Target count: {target_count:,}")
             print(f"  Starting distribution:")
             for cls, count in zip(unique, counts):
                 print(f"    Class {cls}: {count:,}")
 
-        # Apply SMOTE iteratively (n_classes - 1 iterations to balance all)
-        smote = SMOTE(random_state=42, k_neighbors=3, sampling_strategy='minority')
+        # Apply SMOTE iteratively (use BorderlineSMOTE for less noise)
+        if use_borderline:
+            smote = BorderlineSMOTE(random_state=42, k_neighbors=3, sampling_strategy='minority')
+        else:
+            smote = SMOTE(random_state=42, k_neighbors=3, sampling_strategy='minority')
 
         X_resampled = X_imputed.copy()
         y_resampled = y.copy()
 
         if verbose:
-            print(f"\n  Applying iterative SMOTE...")
+            print(f"\n  Applying iterative SMOTE ({iterations} iteration(s))...")
 
-        for iteration in range(n_classes - 1):
+        for iteration in range(iterations):
             X_resampled, y_resampled = smote.fit_resample(X_resampled, y_resampled)
 
             if verbose:
@@ -245,6 +268,8 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
                          output_dir='models',
                          results_dir='results',
                          use_adasyn=True,
+                         balance_strategy='moderate',
+                         use_borderline=False,
                          cross_validate=False,
                          verbose=True):
     """Train Android Expert Model for version classification"""
@@ -348,7 +373,10 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
     if use_adasyn:
         if verbose:
             print(f"\n[5/8] Applying SMOTE to training set...")
-        X_train_resampled, y_train_resampled = apply_smote(X_train, y_train, verbose=verbose)
+        X_train_resampled, y_train_resampled = apply_smote(X_train, y_train,
+                                                            verbose=verbose,
+                                                            balance_strategy=balance_strategy,
+                                                            use_borderline=use_borderline)
     else:
         if verbose:
             print(f"\n[5/8] Skipping SMOTE (disabled)")
@@ -532,7 +560,8 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
         'test_accuracy': float(accuracy),
         'per_class_metrics': per_class_metrics,
         'confusion_matrix': cm.tolist(),
-        'used_smote': use_adasyn,  # variable name kept for compatibility
+        'used_smote': use_adasyn,
+        'balance_strategy': balance_strategy if use_adasyn else None,
         'timestamp': timestamp,
         'feature_importance': importance_df.head(15).to_dict('records'),
     }
@@ -624,7 +653,21 @@ Examples:
     parser.add_argument(
         '--no-adasyn',
         action='store_true',
-        help='Disable ADASYN oversampling (use class weights only)'
+        help='Disable SMOTE oversampling (use class weights only)'
+    )
+
+    parser.add_argument(
+        '--balance-strategy',
+        type=str,
+        choices=['full', 'moderate', 'minimal'],
+        default='moderate',
+        help='SMOTE balancing strategy: full (balance to majority), moderate (balance to median - default), minimal (balance smallest class only)'
+    )
+
+    parser.add_argument(
+        '--borderline-smote',
+        action='store_true',
+        help='Use BorderlineSMOTE instead of regular SMOTE (focuses on decision boundary samples, less noise)'
     )
 
     parser.add_argument(
@@ -647,6 +690,8 @@ Examples:
         output_dir=args.output_dir,
         results_dir=args.results_dir,
         use_adasyn=not args.no_adasyn,
+        balance_strategy=args.balance_strategy,
+        use_borderline=args.borderline_smote,
         cross_validate=args.cross_validate,
         verbose=not args.quiet
     )
