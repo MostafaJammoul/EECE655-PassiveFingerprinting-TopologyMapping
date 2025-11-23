@@ -206,7 +206,8 @@ def train_android_ensemble(input_path='data/processed/masaryk_android.csv',
     cm = confusion_matrix(y_test, ensemble_predictions)
     print(f"\nConfusion Matrix:")
     print("-"*80)
-    print(f"{'Actual \\ Pred':<15}", end="")
+    header = "Actual \\ Pred"
+    print(f"{header:<15}", end="")
     for cls in class_names:
         print(f"{cls:<15}", end="")
     print()
