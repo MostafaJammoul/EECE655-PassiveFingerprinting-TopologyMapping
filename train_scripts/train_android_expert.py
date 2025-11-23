@@ -162,6 +162,7 @@ def apply_adasyn(X, y, verbose=True):
     Apply ADASYN oversampling for class imbalance
 
     Note: Uses sampling_strategy='minority' to avoid errors with moderate imbalance
+    CRITICAL: Imputes NaN values before ADASYN (ADASYN doesn't handle NaN)
     """
     if verbose:
         print(f"\nClass Imbalance Handling (ADASYN):")
@@ -170,9 +171,30 @@ def apply_adasyn(X, y, verbose=True):
             print(f"    {label}: {count:,}")
 
     try:
+        # CRITICAL FIX: Impute NaN values before ADASYN
+        # ADASYN doesn't accept NaN values
+        from sklearn.impute import SimpleImputer
+
+        # Check if there are NaN values
+        has_nan = X.isnull().any().any() if isinstance(X, pd.DataFrame) else np.isnan(X).any()
+
+        if has_nan:
+            if verbose:
+                nan_cols = X.columns[X.isnull().any()].tolist() if isinstance(X, pd.DataFrame) else []
+                print(f"\n  Imputing NaN values in {len(nan_cols)} features before ADASYN")
+
+            imputer = SimpleImputer(strategy='median')
+            X_imputed = pd.DataFrame(
+                imputer.fit_transform(X),
+                columns=X.columns if isinstance(X, pd.DataFrame) else range(X.shape[1]),
+                index=X.index if isinstance(X, pd.DataFrame) else range(X.shape[0])
+            )
+        else:
+            X_imputed = X
+
         # IMPORTANT: sampling_strategy='minority' prevents errors
         adasyn = ADASYN(random_state=42, n_neighbors=5, sampling_strategy='minority')
-        X_resampled, y_resampled = adasyn.fit_resample(X, y)
+        X_resampled, y_resampled = adasyn.fit_resample(X_imputed, y)
 
         if verbose:
             print(f"\n  After ADASYN:")
