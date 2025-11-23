@@ -398,6 +398,20 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
     print("="*80)
     print(classification_report(y_test, y_pred, target_names=class_names, digits=3))
 
+    # Get per-class metrics for JSON output
+    precision, recall, f1, support = precision_recall_fscore_support(
+        y_test, y_pred, labels=range(len(class_names))
+    )
+
+    per_class_metrics = {}
+    for i, class_name in enumerate(class_names):
+        per_class_metrics[class_name] = {
+            'precision': float(precision[i]),
+            'recall': float(recall[i]),
+            'f1_score': float(f1[i]),
+            'support': int(support[i])
+        }
+
     # Confusion matrix
     cm = confusion_matrix(y_test, y_pred)
 
@@ -487,6 +501,8 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
         'n_features': len(feature_names),
         'classes': class_names,
         'test_accuracy': float(accuracy),
+        'per_class_metrics': per_class_metrics,
+        'confusion_matrix': cm.tolist(),
         'used_adasyn': use_adasyn,
         'timestamp': timestamp,
         'feature_importance': importance_df.head(15).to_dict('records'),
