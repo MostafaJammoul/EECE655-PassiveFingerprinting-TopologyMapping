@@ -192,23 +192,34 @@ def apply_adasyn(X, y, verbose=True):
         else:
             X_imputed = X
 
-        # Calculate target counts: balance all classes to majority class size
-        unique, counts = np.unique(y, return_counts=True)
-        class_counts = dict(zip(unique, counts))
-        majority_count = max(counts)
+        # ITERATIVE ADASYN: Balance all classes by applying ADASYN multiple times
+        # ADASYN cannot handle multiple minority classes simultaneously, so we loop
+        # Each iteration balances the smallest minority class
+        # Reference: https://stackoverflow.com/questions/63846718/
 
-        # Create sampling strategy: oversample all minority classes to majority count
-        sampling_strategy = {cls: majority_count for cls in unique if class_counts[cls] < majority_count}
+        unique, counts = np.unique(y, return_counts=True)
+        n_classes = len(unique)
 
         if verbose:
-            print(f"\n  Majority class size: {majority_count:,}")
-            print(f"  Target counts for minority classes:")
-            for cls, target in sampling_strategy.items():
-                print(f"    Class {cls}: {class_counts[cls]:,} → {target:,} (+{target - class_counts[cls]:,})")
+            print(f"\n  Original class distribution:")
+            for cls, count in zip(unique, counts):
+                print(f"    Class {cls}: {count:,}")
 
-        # Use n_neighbors=3 to handle smaller classes better
-        adasyn = ADASYN(random_state=42, n_neighbors=3, sampling_strategy=sampling_strategy)
-        X_resampled, y_resampled = adasyn.fit_resample(X_imputed, y)
+        # Apply ADASYN iteratively (n_classes - 1 iterations to balance all)
+        adasyn = ADASYN(random_state=42, n_neighbors=3, sampling_strategy='minority')
+
+        X_resampled = X_imputed.copy()
+        y_resampled = y.copy()
+
+        if verbose:
+            print(f"\n  Applying ADASYN iteratively ({n_classes - 1} iterations)...")
+
+        for iteration in range(n_classes - 1):
+            X_resampled, y_resampled = adasyn.fit_resample(X_resampled, y_resampled)
+
+            if verbose:
+                unique_iter, counts_iter = np.unique(y_resampled, return_counts=True)
+                print(f"    Iteration {iteration + 1}: {dict(zip(unique_iter, counts_iter))}")
 
         if verbose:
             print(f"\n  After ADASYN:")
