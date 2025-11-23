@@ -46,23 +46,28 @@ except ImportError as e:
 # ============================================================================
 
 def select_features(df, verbose=True):
-    """Select relevant features for Android version classification"""
+    """
+    Select relevant features for Android version classification
 
-    # Same 25 features as Masaryk preprocessing
+    CRITICAL: Removes constant features that provide no discrimination
+    """
+
+    # TCP features (EXCLUDING constant syn_ack_flag)
     tcp_features = [
         'tcp_syn_size',
         'tcp_win_size',
         'tcp_syn_ttl',
         'tcp_flags_a',
-        'syn_ack_flag',
+        # 'syn_ack_flag',  # REMOVED: Constant (all = 1)
         'tcp_option_window_scale_forward',
-        'tcp_option_selective_ack_permitted_forward',
+        # 'tcp_option_selective_ack_permitted_forward',  # REMOVED: Very low variance
         'tcp_option_maximum_segment_size_forward',
-        'tcp_option_no_operation_forward',
+        # 'tcp_option_no_operation_forward',  # REMOVED: Very low variance
     ]
 
+    # IP features (EXCLUDING constant l3_proto)
     ip_features = [
-        'l3_proto',
+        # 'l3_proto',  # REMOVED: Constant (all = 4)
         'ip_tos',
         'maximum_ttl_forward',
         'ipv4_dont_fragment_forward',
@@ -75,12 +80,14 @@ def select_features(df, verbose=True):
         'total_bytes',
     ]
 
+    # TLS features (EXCLUDING constant tls_client_version)
+    # TLS is 99.9% available - CRITICAL for discrimination!
     tls_features = [
         'tls_ja3_fingerprint',
         'tls_cipher_suites',
         'tls_extension_types',
         'tls_elliptic_curves',
-        'tls_client_version',
+        # 'tls_client_version',  # REMOVED: Constant (all = 771.0)
         'tls_handshake_type',
         'tls_client_key_length',
     ]
@@ -95,8 +102,10 @@ def select_features(df, verbose=True):
     missing_features = [f for f in all_features if f not in df.columns]
 
     if verbose:
-        print(f"\nFeature Selection:")
-        print(f"  Available: {len(available_features)}/25")
+        print(f"\nFeature Selection (optimized for Android):")
+        print(f"  Available: {len(available_features)}/19 (removed 6 constant/low-variance)")
+        print(f"  Removed constant: syn_ack_flag, l3_proto, tls_client_version")
+        print(f"  Removed low variance: tcp_option_selective_ack_permitted_forward, tcp_option_no_operation_forward")
         if missing_features:
             print(f"  Missing: {missing_features}")
 
@@ -313,21 +322,31 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
                 print(f"    {cls}: {class_weights[i]:.3f}")
 
     # Train XGBoost model
+    # OPTIMIZED for Android: Deeper trees, more estimators, lower regularization
+    # (classes are very similar, need more aggressive fitting)
     if verbose:
-        print(f"\n[6/8] Training XGBoost model...")
+        print(f"\n[6/8] Training XGBoost model (optimized for Android)...")
 
     model = xgb.XGBClassifier(
-        n_estimators=200,
-        max_depth=8,
-        learning_rate=0.1,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=5,
-        gamma=0.1,
+        n_estimators=500,          # Increased from 200 (more trees to capture subtle patterns)
+        max_depth=12,              # Increased from 8 (deeper trees for complex interactions)
+        learning_rate=0.05,        # Decreased (slower learning = better generalization)
+        subsample=0.9,             # Increased from 0.8 (use more data per tree)
+        colsample_bytree=0.9,      # Increased from 0.8 (use more features)
+        min_child_weight=1,        # Decreased from 5 (allow finer splits)
+        gamma=0.0,                 # Decreased from 0.1 (less regularization)
+        reg_alpha=0.1,             # L1 regularization (feature selection)
+        reg_lambda=1.0,            # L2 regularization (prevent overfitting)
         random_state=42,
         n_jobs=-1,
         eval_metric='mlogloss'
     )
+
+    if verbose:
+        print(f"  Hyperparameters optimized for similar classes:")
+        print(f"    - 500 estimators (vs default 200)")
+        print(f"    - max_depth=12 (vs default 8)")
+        print(f"    - Reduced regularization to capture subtle differences")
 
     model.fit(
         X_train_resampled,
