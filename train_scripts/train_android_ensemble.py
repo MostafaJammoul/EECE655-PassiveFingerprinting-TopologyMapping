@@ -106,12 +106,11 @@ def train_android_ensemble(input_path='data/processed/masaryk_android.csv',
 
     # Feature selection
     print(f"\n[2/6] Selecting features...")
-    df = select_features(df, verbose=True)
+    feature_columns = select_features(df, verbose=True)
 
-    # Encode categorical features
+    # Prepare X and y
     print(f"\n[3/6] Encoding categorical features...")
-    feature_columns = [col for col in df.columns if col != 'os_version']
-    X = df[feature_columns]
+    X = df[feature_columns].copy()
     X, encoders = encode_categorical_features(X, verbose=True)
 
     # Encode target
