@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Train Windows Expert Model: Windows Version Classifier
+Train Linux Expert Model: Linux Distribution/Version Classifier
 
-Dataset: windows.csv (Windows flows from CIC-IDS2017/Masaryk)
-Task: Classify specific Windows version (7, 8, 10, Vista)
+Dataset: linux.csv (Linux flows from Masaryk/CESNET)
+Task: Classify specific Linux distribution/version
 Algorithm: XGBoost with optional SMOTE + class weights
 
-Input:  data/processed/windows.csv
-Output: models/WindowsExpert_<timestamp>/windows_expert.pkl
-        results/WindowsExpert_<timestamp>/windows_expert_evaluation.json
+Input:  data/processed/linux.csv
+Output: models/LinuxExpert_<timestamp>/linux_expert.pkl
+        results/LinuxExpert_<timestamp>/linux_expert_evaluation.json
 """
 
 import os
@@ -47,9 +47,9 @@ except ImportError as e:
 
 def select_features(df, verbose=True):
     """
-    Select relevant features for Windows version classification
+    Select relevant features for Linux version classification
 
-    Same 25-feature structure as Masaryk dataset
+    Same 25-feature structure as Masaryk dataset (used by Android, Windows, etc.)
     """
 
     # TCP features
@@ -101,7 +101,7 @@ def select_features(df, verbose=True):
     missing_features = [f for f in all_features if f not in df.columns]
 
     if verbose:
-        print(f"\nFeature Selection (Windows Expert):")
+        print(f"\nFeature Selection (Linux Expert):")
         print(f"  Available: {len(available_features)}/25 features")
         if missing_features:
             print(f"  Missing: {missing_features}")
@@ -258,19 +258,19 @@ def apply_smote(X, y, verbose=True, balance_strategy='full', use_borderline=Fals
 # MODEL TRAINING
 # ============================================================================
 
-def train_windows_expert(input_path='data/processed/windows.csv',
-                         output_dir='models',
-                         results_dir='results',
-                         use_smote=True,
-                         balance_strategy='moderate',
-                         use_borderline=False,
-                         cross_validate=False,
-                         verbose=True):
-    """Train Windows Expert Model for version classification"""
+def train_linux_expert(input_path='data/processed/linux.csv',
+                       output_dir='models',
+                       results_dir='results',
+                       use_smote=True,
+                       balance_strategy='moderate',
+                       use_borderline=False,
+                       cross_validate=False,
+                       verbose=True):
+    """Train Linux Expert Model for distribution/version classification"""
 
     # Create timestamped directories
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    run_name = f"WindowsExpert_{timestamp}"
+    run_name = f"LinuxExpert_{timestamp}"
 
     model_output_dir = os.path.join(output_dir, run_name)
     results_output_dir = os.path.join(results_dir, run_name)
@@ -279,9 +279,9 @@ def train_windows_expert(input_path='data/processed/windows.csv',
 
     if verbose:
         print("="*80)
-        print("WINDOWS EXPERT MODEL - TRAINING")
+        print("LINUX EXPERT MODEL - TRAINING")
         print("="*80)
-        print(f"\nTask: Windows version classification (7, 8, 10, Vista)")
+        print(f"\nTask: Linux distribution/version classification")
         print(f"Algorithm: XGBoost with {'SMOTE + ' if use_smote else ''}class weights")
         print(f"Input: {input_path}")
         print(f"\nOutput directories:")
@@ -294,8 +294,8 @@ def train_windows_expert(input_path='data/processed/windows.csv',
 
     if not os.path.exists(input_path):
         print(f"\n✗ ERROR: Input file not found: {input_path}")
-        print(f"\nPlease create windows.csv first using:")
-        print(f"  - Extract Windows flows from CIC-IDS2017/nprint dataset")
+        print(f"\nPlease create linux.csv first using:")
+        print(f"  - Extract Linux flows from Masaryk/CESNET datasets")
         print(f"  - Ensure format matches masaryk_android.csv (25 features + os_label)")
         return None, None
 
@@ -467,7 +467,7 @@ def train_windows_expert(input_path='data/processed/windows.csv',
             print(f"  {row['feature']:<40} {row['importance']:.4f}")
 
     # Save model
-    model_path = os.path.join(model_output_dir, 'windows_expert.pkl')
+    model_path = os.path.join(model_output_dir, 'linux_expert.pkl')
     model_data = {
         'model': model,
         'label_encoder': label_encoder,
@@ -497,7 +497,7 @@ def train_windows_expert(input_path='data/processed/windows.csv',
         }
 
     results = {
-        'model_type': 'WindowsExpert',
+        'model_type': 'LinuxExpert',
         'classes': class_names,
         'test_accuracy': float(accuracy),
         'per_class_metrics': per_class_metrics,
@@ -508,7 +508,7 @@ def train_windows_expert(input_path='data/processed/windows.csv',
         'feature_importance': importance_df.head(15).to_dict('records'),
     }
 
-    eval_path = os.path.join(results_output_dir, 'windows_expert_evaluation.json')
+    eval_path = os.path.join(results_output_dir, 'linux_expert_evaluation.json')
     with open(eval_path, 'w') as f:
         json.dump(results, f, indent=2)
 
@@ -532,14 +532,14 @@ def train_windows_expert(input_path='data/processed/windows.csv',
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Train Windows Expert Model for Windows version classification'
+        description='Train Linux Expert Model for Linux distribution/version classification'
     )
 
     parser.add_argument(
         '--input',
         type=str,
-        default='data/processed/windows.csv',
-        help='Path to Windows dataset CSV file'
+        default='data/processed/linux.csv',
+        help='Path to Linux dataset CSV file'
     )
 
     parser.add_argument(
@@ -591,7 +591,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Train model
-    model, accuracy = train_windows_expert(
+    model, accuracy = train_linux_expert(
         input_path=args.input,
         output_dir=args.output_dir,
         results_dir=args.results_dir,

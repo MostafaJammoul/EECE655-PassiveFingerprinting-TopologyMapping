@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """
-Hyperparameter Tuning for OS Family Classification
+Adaptive Hyperparameter Tuning for Expert Models
 
-Uses RandomizedSearchCV or GridSearchCV to find optimal XGBoost hyperparameters.
-Saves best parameters to JSON for use in training script.
+Automatically tunes hyperparameters for Linux, Windows, or Android Expert models.
+Uses RandomizedSearchCV or GridSearchCV to find optimal XGBoost parameters.
 
 Usage:
-    python tune_hyperparameters.py --data data/processed/masaryk_processed.csv --search-type random --n-iter 50
-    python tune_hyperparameters.py --data data/processed/masaryk_processed.csv --search-type grid
+    # Auto-detect from input file:
+    python train_scripts/tune_hyperparameters.py --input data/processed/linux.csv
+    python train_scripts/tune_hyperparameters.py --input data/processed/windows.csv
+    python train_scripts/tune_hyperparameters.py --input data/processed/masaryk_android.csv
+
+    # Specify model type explicitly:
+    python train_scripts/tune_hyperparameters.py --model-type linux --input data/processed/linux.csv
+
+    # Customize search:
+    python train_scripts/tune_hyperparameters.py --input data/processed/linux.csv --n-iter 100
+    python train_scripts/tune_hyperparameters.py --input data/processed/linux.csv --search-type grid
 """
 
 import os
@@ -22,58 +31,127 @@ from pathlib import Path
 
 from sklearn.model_selection import RandomizedSearchCV, GridSearchCV, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report, accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score
+from sklearn.impute import SimpleImputer
 from scipy.stats import randint, uniform
 
 
-def load_and_prepare_data(data_path, use_adasyn=False, random_state=42, verbose=True):
-    """Load data and prepare for training"""
+def detect_model_type(input_path):
+    """Auto-detect model type from filename"""
+    filename = os.path.basename(input_path).lower()
+
+    if 'linux' in filename:
+        return 'linux'
+    elif 'windows' in filename:
+        return 'windows'
+    elif 'android' in filename:
+        return 'android'
+    else:
+        # Default to checking file contents
+        return None
+
+
+def select_features_for_model(df, model_type):
+    """
+    Select features based on model type
+
+    All models use the same 25-feature Masaryk structure.
+    Android removes some constant/low-variance features.
+    """
+
+    if model_type == 'android':
+        # Android: Remove constant/low-variance features
+        features = [
+            'tcp_syn_size', 'tcp_win_size', 'tcp_syn_ttl', 'tcp_flags_a',
+            'tcp_option_window_scale_forward', 'tcp_option_maximum_segment_size_forward',
+            'ip_tos', 'maximum_ttl_forward', 'ipv4_dont_fragment_forward',
+            'src_port', 'packet_total_count_forward', 'packet_total_count_backward', 'total_bytes',
+            'tls_ja3_fingerprint', 'tls_cipher_suites', 'tls_extension_types', 'tls_elliptic_curves',
+            'tls_handshake_type', 'tls_client_key_length',
+            'initial_ttl',
+        ]
+    else:
+        # Linux/Windows: Use all 25 features
+        features = [
+            # TCP
+            'tcp_syn_size', 'tcp_win_size', 'tcp_syn_ttl', 'tcp_flags_a', 'syn_ack_flag',
+            'tcp_option_window_scale_forward', 'tcp_option_selective_ack_permitted_forward',
+            'tcp_option_maximum_segment_size_forward', 'tcp_option_no_operation_forward',
+            # IP
+            'l3_proto', 'ip_tos', 'maximum_ttl_forward', 'ipv4_dont_fragment_forward',
+            # Flow
+            'src_port', 'packet_total_count_forward', 'packet_total_count_backward', 'total_bytes',
+            # TLS
+            'tls_ja3_fingerprint', 'tls_cipher_suites', 'tls_extension_types', 'tls_elliptic_curves',
+            'tls_client_version', 'tls_handshake_type', 'tls_client_key_length',
+            # Derived
+            'initial_ttl',
+        ]
+
+    available = [f for f in features if f in df.columns]
+    return available
+
+
+def load_and_prepare_data(data_path, model_type, verbose=True):
+    """Load and prepare dataset for tuning"""
 
     if verbose:
-        print("="*70)
-        print("LOADING DATA")
-        print("="*70)
+        print("="*80)
+        print(f"LOADING {model_type.upper()} DATASET")
+        print("="*80)
 
-    # Load dataset
+    if not os.path.exists(data_path):
+        print(f"\n✗ ERROR: File not found: {data_path}")
+        sys.exit(1)
+
     df = pd.read_csv(data_path)
 
     if verbose:
         print(f"\nDataset shape: {df.shape}")
         print(f"  Records: {len(df):,}")
-        print(f"  Features: {len(df.columns)}")
 
-    # Separate features and target
-    if 'os_family' not in df.columns:
-        raise ValueError("Dataset must contain 'os_family' column")
+    if 'os_label' not in df.columns:
+        print(f"\n✗ ERROR: Dataset must contain 'os_label' column")
+        sys.exit(1)
 
-    X = df.drop(columns=['os_family'])
-    y = df['os_family']
+    # Select features
+    feature_cols = select_features_for_model(df, model_type)
+
+    if verbose:
+        print(f"\nFeatures selected: {len(feature_cols)}")
+
+    X = df[feature_cols].copy()
+    y = df['os_label'].copy()
 
     if verbose:
         print(f"\nClass distribution:")
-        print(y.value_counts())
-        print(f"\nClass balance:")
-        print((y.value_counts() / len(y) * 100).round(2))
+        for label, count in y.value_counts().items():
+            pct = (count / len(y)) * 100
+            print(f"  {label:<30}: {count:>6,} ({pct:>5.1f}%)")
 
     # Encode categorical features
     categorical_features = X.select_dtypes(include=['object']).columns.tolist()
 
     if verbose and categorical_features:
-        print(f"\nEncoding {len(categorical_features)} categorical features:")
-        for feat in categorical_features:
-            print(f"  - {feat}")
+        print(f"\nEncoding {len(categorical_features)} categorical features...")
 
-    label_encoders = {}
     for col in categorical_features:
         le = LabelEncoder()
-        # Handle NaN values
-        mask = X[col].notna()
-        X.loc[mask, col] = le.fit_transform(X.loc[mask, col].astype(str))
-        X[col] = X[col].fillna(-1).astype(int)
-        label_encoders[col] = le
+        X[col] = X[col].fillna('__MISSING__')
+        X[col] = le.fit_transform(X[col].astype(str))
 
-    # Fill remaining NaN with -1
-    X = X.fillna(-1)
+    # Impute NaN values
+    if verbose:
+        nan_count = X.isnull().sum().sum()
+        if nan_count > 0:
+            print(f"\nImputing {nan_count} NaN values (median strategy)...")
+
+    imputer = SimpleImputer(strategy='median')
+    X = pd.DataFrame(
+        imputer.fit_transform(X),
+        columns=X.columns,
+        index=X.index
+    )
 
     # Encode target
     target_encoder = LabelEncoder()
@@ -82,243 +160,157 @@ def load_and_prepare_data(data_path, use_adasyn=False, random_state=42, verbose=
     if verbose:
         print(f"\nEncoded classes: {list(target_encoder.classes_)}")
 
-    # Apply ADASYN if requested
-    if use_adasyn:
-        try:
-            from imblearn.over_sampling import ADASYN
-
-            if verbose:
-                print(f"\nApplying ADASYN oversampling...")
-                print(f"  Before: {len(X):,} samples")
-
-            adasyn = ADASYN(random_state=random_state, sampling_strategy='minority')
-            X, y_encoded = adasyn.fit_resample(X, y_encoded)
-
-            if verbose:
-                print(f"  After: {len(X):,} samples")
-                unique, counts = np.unique(y_encoded, return_counts=True)
-                print(f"\n  Class distribution after ADASYN:")
-                for cls, count in zip(unique, counts):
-                    cls_name = target_encoder.inverse_transform([cls])[0]
-                    print(f"    {cls_name:<15}: {count:>6,}")
-        except ImportError:
-            print("WARNING: ADASYN requested but imbalanced-learn not installed. Skipping.")
-
-    return X, y_encoded, target_encoder, label_encoders
+    return X, y_encoded, target_encoder
 
 
-def get_param_distributions(search_type='random'):
+def get_param_distributions(search_type='random', model_type='android'):
     """
-    Get hyperparameter search space for XGBoost
+    Get hyperparameter search space
 
-    Args:
-        search_type: 'random' for RandomizedSearchCV or 'grid' for GridSearchCV
-
-    Returns:
-        Parameter distribution dict
+    Optimized for each model type:
+    - Android: Similar classes (shared Linux kernel) - needs deeper trees, more regularization
+    - Windows: Different TCP stacks - standard search space
+    - Linux: Varies by distribution - standard to broader search space
     """
 
     if search_type == 'random':
-        # For RandomizedSearchCV - use scipy distributions
-        return {
-            'n_estimators': randint(100, 1000),
-            'max_depth': randint(3, 15),
-            'learning_rate': uniform(0.01, 0.29),  # 0.01 to 0.3
-            'subsample': uniform(0.6, 0.4),  # 0.6 to 1.0
-            'colsample_bytree': uniform(0.6, 0.4),  # 0.6 to 1.0
-            'gamma': uniform(0, 5),
-            'min_child_weight': randint(1, 10),
-            'reg_alpha': uniform(0, 1),
-            'reg_lambda': uniform(1, 10),
+        # Randomized search - broader parameter space
+        params = {
+            'n_estimators': randint(300, 1000),
+            'max_depth': randint(8, 20),
+            'learning_rate': uniform(0.01, 0.15),
+            'subsample': uniform(0.7, 0.3),           # 0.7 to 1.0
+            'colsample_bytree': uniform(0.7, 0.3),    # 0.7 to 1.0
+            'gamma': uniform(0, 2),
+            'min_child_weight': randint(1, 8),
+            'reg_alpha': uniform(0, 0.5),
+            'reg_lambda': uniform(0.5, 5),
         }
+
+        # Android needs more regularization for similar classes
+        if model_type == 'android':
+            params['max_depth'] = randint(12, 22)         # Deeper trees
+            params['gamma'] = uniform(0.1, 2)             # More pruning
+            params['reg_lambda'] = uniform(1.0, 5)        # Stronger L2
+
     else:
-        # For GridSearchCV - use discrete values
-        return {
-            'n_estimators': [100, 200, 500, 800],
-            'max_depth': [3, 5, 7, 10, 12],
-            'learning_rate': [0.01, 0.05, 0.1, 0.2, 0.3],
-            'subsample': [0.6, 0.8, 1.0],
-            'colsample_bytree': [0.6, 0.8, 1.0],
-            'gamma': [0, 1, 3, 5],
-            'min_child_weight': [1, 3, 5, 7],
-            'reg_alpha': [0, 0.1, 0.5, 1.0],
-            'reg_lambda': [1, 2, 5, 10],
+        # Grid search - focused parameter grid
+        params = {
+            'n_estimators': [300, 500, 700, 1000],
+            'max_depth': [8, 10, 12, 15, 18],
+            'learning_rate': [0.01, 0.03, 0.05, 0.07, 0.1],
+            'subsample': [0.7, 0.8, 0.9, 1.0],
+            'colsample_bytree': [0.7, 0.8, 0.9, 1.0],
+            'gamma': [0, 0.5, 1.0, 1.5],
+            'min_child_weight': [1, 2, 3, 5],
+            'reg_alpha': [0, 0.1, 0.3, 0.5],
+            'reg_lambda': [0.5, 1.0, 2.0, 3.0],
         }
 
+        # Android-specific adjustments
+        if model_type == 'android':
+            params['max_depth'] = [10, 12, 15, 18, 20]
+            params['gamma'] = [0.1, 0.5, 1.0, 1.5, 2.0]
 
-def tune_hyperparameters(X, y, search_type='random', n_iter=50, cv=5,
-                         n_jobs=-1, random_state=42, verbose=True):
+    return params
+
+
+def tune_hyperparameters(X, y, model_type='android', search_type='random',
+                         n_iter=50, cv=5, n_jobs=-1, random_state=42, verbose=True):
     """
     Perform hyperparameter tuning using RandomizedSearchCV or GridSearchCV
-
-    Args:
-        X: Features
-        y: Target (encoded)
-        search_type: 'random' or 'grid'
-        n_iter: Number of iterations for RandomizedSearchCV
-        cv: Number of cross-validation folds
-        n_jobs: Number of parallel jobs (-1 = all cores)
-        random_state: Random seed
-        verbose: Print progress
-
-    Returns:
-        Best estimator and search results
     """
 
     if verbose:
-        print("\n" + "="*70)
-        print(f"HYPERPARAMETER TUNING - {search_type.upper()} SEARCH")
-        print("="*70)
+        print("\n" + "="*80)
+        print("HYPERPARAMETER TUNING")
+        print("="*80)
+        print(f"\nModel Type: {model_type.upper()}")
+        print(f"Search Type: {search_type.upper()}")
+        print(f"Search Iterations: {n_iter if search_type == 'random' else 'Full Grid'}")
+        print(f"Cross-Validation Folds: {cv}")
+        print(f"Scoring Metric: F1-weighted")
 
     # Get parameter distributions
-    param_dist = get_param_distributions(search_type)
-
-    if verbose:
-        print(f"\nSearch space:")
-        for param, values in param_dist.items():
-            print(f"  {param}: {values}")
+    param_dist = get_param_distributions(search_type, model_type)
 
     # Base model
     base_model = xgb.XGBClassifier(
-        objective='multi:softmax',
-        tree_method='hist',
         random_state=random_state,
-        early_stopping_rounds=20,
-        eval_metric='mlogloss'
+        n_jobs=n_jobs,
+        objective='multi:softmax',
+        num_class=len(np.unique(y))
     )
 
-    # Cross-validation strategy
-    cv_strategy = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
-
-    if verbose:
-        print(f"\nCross-validation: {cv}-fold StratifiedKFold")
-
-    # Create search object
+    # Setup search
     if search_type == 'random':
         search = RandomizedSearchCV(
             estimator=base_model,
             param_distributions=param_dist,
             n_iter=n_iter,
-            cv=cv_strategy,
             scoring='f1_weighted',
-            n_jobs=n_jobs,
+            cv=StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state),
+            verbose=1 if verbose else 0,
             random_state=random_state,
-            verbose=2,
-            return_train_score=True
+            n_jobs=n_jobs,
+            return_train_score=False
         )
-        if verbose:
-            print(f"RandomizedSearchCV: Testing {n_iter} parameter combinations")
-    else:
+    else:  # grid
         search = GridSearchCV(
             estimator=base_model,
             param_grid=param_dist,
-            cv=cv_strategy,
             scoring='f1_weighted',
+            cv=StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state),
+            verbose=1 if verbose else 0,
             n_jobs=n_jobs,
-            verbose=2,
-            return_train_score=True
+            return_train_score=False
         )
-        # Calculate total combinations
-        total_combinations = 1
-        for values in param_dist.values():
-            total_combinations *= len(values)
-        if verbose:
-            print(f"GridSearchCV: Testing all {total_combinations:,} parameter combinations")
-
-    # Fit search
-    if verbose:
-        print(f"\nStarting search at {datetime.now().strftime('%H:%M:%S')}...")
-
-    # Create a validation set for early stopping
-    from sklearn.model_selection import train_test_split
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.2, random_state=random_state, stratify=y
-    )
-
-    search.fit(
-        X_train, y_train,
-        eval_set=[(X_val, y_val)],
-        verbose=False
-    )
 
     if verbose:
-        print(f"Search completed at {datetime.now().strftime('%H:%M:%S')}")
+        print(f"\nStarting search...")
+        print("-" * 80)
 
-    return search
-
-
-def save_results(search, output_dir, target_encoder, verbose=True):
-    """Save tuning results and best parameters"""
-
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Save best parameters
-    best_params_path = os.path.join(output_dir, 'best_hyperparameters.json')
-    with open(best_params_path, 'w') as f:
-        json.dump(search.best_params_, f, indent=2)
+    # Perform search
+    search.fit(X, y)
 
     if verbose:
-        print("\n" + "="*70)
-        print("BEST HYPERPARAMETERS")
-        print("="*70)
-        print(json.dumps(search.best_params_, indent=2))
-        print(f"\nSaved to: {best_params_path}")
-
-    # Save CV results
-    cv_results_df = pd.DataFrame(search.cv_results_)
-    cv_results_path = os.path.join(output_dir, 'cv_results.csv')
-    cv_results_df.to_csv(cv_results_path, index=False)
-
-    if verbose:
-        print(f"\n" + "="*70)
-        print("CROSS-VALIDATION RESULTS")
-        print("="*70)
+        print("\n" + "="*80)
+        print("TUNING RESULTS")
+        print("="*80)
         print(f"\nBest CV Score (F1-weighted): {search.best_score_:.4f}")
-        print(f"\nTop 5 parameter combinations:")
-        top_5 = cv_results_df.nlargest(5, 'mean_test_score')[
-            ['mean_test_score', 'std_test_score', 'params']
-        ]
-        for idx, row in top_5.iterrows():
-            print(f"\n  Score: {row['mean_test_score']:.4f} (+/- {row['std_test_score']:.4f})")
-            print(f"  Params: {row['params']}")
+        print(f"\nBest Hyperparameters:")
+        print("-" * 80)
+        for param, value in sorted(search.best_params_.items()):
+            print(f"  {param:<20}: {value}")
 
-        print(f"\nFull CV results saved to: {cv_results_path}")
-
-    # Save summary
-    summary = {
-        'best_score': float(search.best_score_),
-        'best_params': search.best_params_,
-        'n_splits': search.n_splits_,
-        'total_fits': len(cv_results_df),
-        'tuning_date': datetime.now().isoformat(),
-    }
-
-    summary_path = os.path.join(output_dir, 'tuning_summary.json')
-    with open(summary_path, 'w') as f:
-        json.dump(summary, f, indent=2)
-
-    if verbose:
-        print(f"\nSummary saved to: {summary_path}")
+    return search.best_params_, search.best_score_, search
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Hyperparameter tuning for OS family classification'
+        description='Adaptive Hyperparameter Tuning for Expert Models (Linux/Windows/Android)'
     )
 
     parser.add_argument(
-        '--data',
+        '--input',
         type=str,
         required=True,
-        help='Path to processed CSV file'
+        help='Path to dataset CSV file (linux.csv, windows.csv, or masaryk_android.csv)'
+    )
+
+    parser.add_argument(
+        '--model-type',
+        type=str,
+        choices=['linux', 'windows', 'android'],
+        help='Model type (auto-detected from filename if not specified)'
     )
 
     parser.add_argument(
         '--search-type',
         type=str,
-        default='random',
         choices=['random', 'grid'],
-        help='Search type: random (RandomizedSearchCV) or grid (GridSearchCV)'
+        default='random',
+        help='Search strategy: random (RandomizedSearchCV) or grid (GridSearchCV)'
     )
 
     parser.add_argument(
@@ -336,30 +328,17 @@ def main():
     )
 
     parser.add_argument(
-        '--use-adasyn',
-        action='store_true',
-        help='Use ADASYN oversampling before tuning'
-    )
-
-    parser.add_argument(
         '--output-dir',
         type=str,
-        default='results/hyperparameter_tuning',
-        help='Output directory for results'
+        default='results',
+        help='Directory to save tuning results'
     )
 
     parser.add_argument(
         '--n-jobs',
         type=int,
         default=-1,
-        help='Number of parallel jobs (-1 = all cores)'
-    )
-
-    parser.add_argument(
-        '--random-state',
-        type=int,
-        default=42,
-        help='Random seed for reproducibility'
+        help='Number of parallel jobs (-1 = use all cores)'
     )
 
     parser.add_argument(
@@ -370,41 +349,78 @@ def main():
 
     args = parser.parse_args()
 
-    verbose = not args.quiet
+    # Auto-detect model type if not specified
+    if args.model_type is None:
+        args.model_type = detect_model_type(args.input)
+        if args.model_type is None:
+            print("\n✗ ERROR: Could not auto-detect model type from filename.")
+            print("  Please specify --model-type (linux/windows/android)")
+            sys.exit(1)
+
+    if not args.quiet:
+        print(f"\nAuto-detected model type: {args.model_type.upper()}")
 
     # Load and prepare data
-    X, y, target_encoder, label_encoders = load_and_prepare_data(
-        args.data,
-        use_adasyn=args.use_adasyn,
-        random_state=args.random_state,
-        verbose=verbose
+    X, y, label_encoder = load_and_prepare_data(
+        args.input,
+        args.model_type,
+        verbose=not args.quiet
     )
 
     # Tune hyperparameters
-    search = tune_hyperparameters(
+    best_params, best_score, search = tune_hyperparameters(
         X, y,
+        model_type=args.model_type,
         search_type=args.search_type,
         n_iter=args.n_iter,
         cv=args.cv,
         n_jobs=args.n_jobs,
-        random_state=args.random_state,
-        verbose=verbose
+        random_state=42,
+        verbose=not args.quiet
     )
 
     # Save results
-    save_results(
-        search,
-        args.output_dir,
-        target_encoder,
-        verbose=verbose
-    )
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_subdir = f"{args.model_type.capitalize()}Tuning_{timestamp}"
+    output_dir = os.path.join(args.output_dir, output_subdir)
+    os.makedirs(output_dir, exist_ok=True)
 
-    if verbose:
-        print("\n✓ Hyperparameter tuning complete!")
-        print(f"\nTo use these hyperparameters in training, copy them from:")
-        print(f"  {os.path.join(args.output_dir, 'best_hyperparameters.json')}")
-        print(f"\nOr modify train_model1_family.py to load from this file automatically.")
+    # Save best hyperparameters
+    results = {
+        'model_type': args.model_type,
+        'search_type': args.search_type,
+        'best_cv_score': float(best_score),
+        'best_params': best_params,
+        'classes': list(label_encoder.classes_),
+        'n_features': X.shape[1],
+        'n_samples': X.shape[0],
+        'cv_folds': args.cv,
+        'n_iterations': args.n_iter if args.search_type == 'random' else 'full_grid',
+        'timestamp': timestamp
+    }
+
+    results_file = os.path.join(output_dir, 'best_hyperparameters.json')
+    with open(results_file, 'w') as f:
+        json.dump(results, f, indent=2)
+
+    if not args.quiet:
+        print(f"\n" + "="*80)
+        print("RESULTS SAVED")
+        print("="*80)
+        print(f"\nBest hyperparameters saved to:")
+        print(f"  {results_file}")
+        print(f"\nTo use these hyperparameters, update train_{args.model_type}_expert.py")
+        print(f"with the values from best_hyperparameters.json")
+
+        print(f"\n" + "="*80)
+        print(f"EXPECTED IMPROVEMENT")
+        print(f"="*80)
+        print(f"\nCurrent baseline (default params): ~70-75%")
+        print(f"Expected with tuned params: ~{best_score*100:.1f}%")
+        print(f"Improvement: ~{(best_score - 0.70)*100:+.1f}%")
+
+    return best_params, best_score
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    best_params, best_score = main()
