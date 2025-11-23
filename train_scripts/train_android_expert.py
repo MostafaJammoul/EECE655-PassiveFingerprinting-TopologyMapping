@@ -4,7 +4,7 @@ Train Android Expert Model: Android Version Classifier
 
 Dataset: masaryk_android.csv (Android flows from Masaryk)
 Task: Classify specific Android version (7, 8, 9, 10)
-Algorithm: XGBoost with optional ADASYN + class weights
+Algorithm: XGBoost with optional SMOTE + class weights
 
 Input:  data/processed/masaryk_android.csv
 Output: models/AndroidExpert_<timestamp>/android_expert.pkl
@@ -30,7 +30,7 @@ try:
         accuracy_score, precision_recall_fscore_support,
         confusion_matrix, classification_report
     )
-    from imblearn.over_sampling import ADASYN
+    from imblearn.over_sampling import SMOTE
     from sklearn.utils.class_weight import compute_class_weight
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -157,22 +157,24 @@ def encode_categorical_features(X, encoders=None, verbose=True):
     return X_encoded, encoders
 
 
-def apply_adasyn(X, y, verbose=True):
+def apply_smote(X, y, verbose=True):
     """
-    Apply ADASYN oversampling for class imbalance
+    Apply SMOTE oversampling for class imbalance
 
-    Note: Uses sampling_strategy='minority' to avoid errors with moderate imbalance
-    CRITICAL: Imputes NaN values before ADASYN (ADASYN doesn't handle NaN)
+    SMOTE is more reliable than ADASYN for multiclass balancing because it always
+    generates the requested number of synthetic samples (not adaptive).
+
+    CRITICAL: Imputes NaN values before SMOTE (SMOTE doesn't handle NaN)
     """
     if verbose:
-        print(f"\nClass Imbalance Handling (ADASYN):")
+        print(f"\nClass Imbalance Handling (SMOTE):")
         print(f"  Original class distribution:")
         for label, count in pd.Series(y).value_counts().items():
             print(f"    {label}: {count:,}")
 
     try:
-        # CRITICAL FIX: Impute NaN values before ADASYN
-        # ADASYN doesn't accept NaN values
+        # CRITICAL FIX: Impute NaN values before SMOTE
+        # SMOTE doesn't accept NaN values
         from sklearn.impute import SimpleImputer
 
         # Check if there are NaN values
@@ -181,7 +183,7 @@ def apply_adasyn(X, y, verbose=True):
         if has_nan:
             if verbose:
                 nan_cols = X.columns[X.isnull().any()].tolist() if isinstance(X, pd.DataFrame) else []
-                print(f"\n  Imputing NaN values in {len(nan_cols)} features before ADASYN")
+                print(f"\n  Imputing NaN values in {len(nan_cols)} features before SMOTE")
 
             imputer = SimpleImputer(strategy='median')
             X_imputed = pd.DataFrame(
@@ -192,37 +194,37 @@ def apply_adasyn(X, y, verbose=True):
         else:
             X_imputed = X
 
-        # ITERATIVE ADASYN: Balance all classes by applying ADASYN multiple times
-        # ADASYN cannot handle multiple minority classes simultaneously, so we loop
-        # Each iteration balances the smallest minority class
-        # Reference: https://stackoverflow.com/questions/63846718/
+        # ITERATIVE SMOTE: Balance all classes by applying SMOTE multiple times
+        # SMOTE reliably generates synthetic samples for each minority class
+        # Each iteration balances the smallest minority class to the current majority
 
         unique, counts = np.unique(y, return_counts=True)
         n_classes = len(unique)
 
         if verbose:
-            print(f"\n  Original class distribution:")
+            print(f"\n  Balancing strategy: Iterative SMOTE ({n_classes - 1} iterations)")
+            print(f"  Starting distribution:")
             for cls, count in zip(unique, counts):
                 print(f"    Class {cls}: {count:,}")
 
-        # Apply ADASYN iteratively (n_classes - 1 iterations to balance all)
-        adasyn = ADASYN(random_state=42, n_neighbors=3, sampling_strategy='minority')
+        # Apply SMOTE iteratively (n_classes - 1 iterations to balance all)
+        smote = SMOTE(random_state=42, k_neighbors=3, sampling_strategy='minority')
 
         X_resampled = X_imputed.copy()
         y_resampled = y.copy()
 
         if verbose:
-            print(f"\n  Applying ADASYN iteratively ({n_classes - 1} iterations)...")
+            print(f"\n  Applying iterative SMOTE...")
 
         for iteration in range(n_classes - 1):
-            X_resampled, y_resampled = adasyn.fit_resample(X_resampled, y_resampled)
+            X_resampled, y_resampled = smote.fit_resample(X_resampled, y_resampled)
 
             if verbose:
                 unique_iter, counts_iter = np.unique(y_resampled, return_counts=True)
                 print(f"    Iteration {iteration + 1}: {dict(zip(unique_iter, counts_iter))}")
 
         if verbose:
-            print(f"\n  After ADASYN:")
+            print(f"\n  After SMOTE:")
             for label, count in pd.Series(y_resampled).value_counts().items():
                 print(f"    {label}: {count:,}")
             print(f"\n  Total samples: {len(y):,} → {len(y_resampled):,} (+{len(y_resampled)-len(y):,})")
@@ -230,7 +232,7 @@ def apply_adasyn(X, y, verbose=True):
         return X_resampled, y_resampled
 
     except Exception as e:
-        print(f"\n  WARNING: ADASYN failed: {e}")
+        print(f"\n  WARNING: SMOTE failed: {e}")
         print(f"  Falling back to original data with class weights only")
         return X, y
 
@@ -261,7 +263,7 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
     print("ANDROID EXPERT MODEL - TRAINING")
     print("="*80)
     print(f"\nTask: Android version classification (7, 8, 9, 10)")
-    print(f"Algorithm: XGBoost with {'ADASYN + ' if use_adasyn else ''}class weights")
+    print(f"Algorithm: XGBoost with {'SMOTE + ' if use_adasyn else ''}class weights")
     print(f"Input: {input_path}")
     print(f"\nOutput directories:")
     print(f"  Models: {model_output_dir}")
@@ -342,14 +344,14 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
         print(f"  Train: {len(X_train):,} samples")
         print(f"  Test:  {len(X_test):,} samples")
 
-    # Apply ADASYN (optional)
+    # Apply SMOTE (optional)
     if use_adasyn:
         if verbose:
-            print(f"\n[5/8] Applying ADASYN to training set...")
-        X_train_resampled, y_train_resampled = apply_adasyn(X_train, y_train, verbose=verbose)
+            print(f"\n[5/8] Applying SMOTE to training set...")
+        X_train_resampled, y_train_resampled = apply_smote(X_train, y_train, verbose=verbose)
     else:
         if verbose:
-            print(f"\n[5/8] Skipping ADASYN (disabled)")
+            print(f"\n[5/8] Skipping SMOTE (disabled)")
         X_train_resampled = X_train
         y_train_resampled = y_train
 
@@ -530,7 +532,7 @@ def train_android_expert(input_path='data/processed/masaryk_android.csv',
         'test_accuracy': float(accuracy),
         'per_class_metrics': per_class_metrics,
         'confusion_matrix': cm.tolist(),
-        'used_adasyn': use_adasyn,
+        'used_smote': use_adasyn,  # variable name kept for compatibility
         'timestamp': timestamp,
         'feature_importance': importance_df.head(15).to_dict('records'),
     }
