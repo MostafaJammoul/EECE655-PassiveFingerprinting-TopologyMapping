@@ -192,8 +192,22 @@ def apply_adasyn(X, y, verbose=True):
         else:
             X_imputed = X
 
-        # IMPORTANT: sampling_strategy='minority' prevents errors
-        adasyn = ADASYN(random_state=42, n_neighbors=5, sampling_strategy='minority')
+        # Calculate target counts: balance all classes to majority class size
+        unique, counts = np.unique(y, return_counts=True)
+        class_counts = dict(zip(unique, counts))
+        majority_count = max(counts)
+
+        # Create sampling strategy: oversample all minority classes to majority count
+        sampling_strategy = {cls: majority_count for cls in unique if class_counts[cls] < majority_count}
+
+        if verbose:
+            print(f"\n  Majority class size: {majority_count:,}")
+            print(f"  Target counts for minority classes:")
+            for cls, target in sampling_strategy.items():
+                print(f"    Class {cls}: {class_counts[cls]:,} → {target:,} (+{target - class_counts[cls]:,})")
+
+        # Use n_neighbors=3 to handle smaller classes better
+        adasyn = ADASYN(random_state=42, n_neighbors=3, sampling_strategy=sampling_strategy)
         X_resampled, y_resampled = adasyn.fit_resample(X_imputed, y)
 
         if verbose:
