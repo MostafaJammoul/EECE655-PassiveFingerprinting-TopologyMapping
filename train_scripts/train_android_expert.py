@@ -209,15 +209,12 @@ def apply_smote(X, y, verbose=True, balance_strategy='full', use_borderline=Fals
         if balance_strategy == 'full':
             # Balance all to majority class
             target_count = max(counts)
-            iterations = n_classes - 1
         elif balance_strategy == 'moderate':
             # Balance all to median count (less synthetic noise)
             target_count = int(np.median(counts))
-            iterations = n_classes - 1
         else:  # minimal
             # Balance only smallest class to second smallest
             target_count = sorted(counts)[1]
-            iterations = 1
 
         if verbose:
             smote_type = "BorderlineSMOTE" if use_borderline else "SMOTE"
@@ -237,9 +234,21 @@ def apply_smote(X, y, verbose=True, balance_strategy='full', use_borderline=Fals
         y_resampled = y.copy()
 
         if verbose:
-            print(f"\n  Applying iterative SMOTE ({iterations} iteration(s))...")
+            print(f"\n  Applying iterative SMOTE (stopping when target reached)...")
 
-        for iteration in range(iterations):
+        # Iterate until all minority classes reach target_count
+        max_iterations = n_classes - 1
+        for iteration in range(max_iterations):
+            # Check current distribution
+            unique_current, counts_current = np.unique(y_resampled, return_counts=True)
+            min_count = min(counts_current)
+
+            # Stop if smallest class has reached or exceeded target
+            if min_count >= target_count:
+                if verbose:
+                    print(f"    Target reached after {iteration} iteration(s)")
+                break
+
             X_resampled, y_resampled = smote.fit_resample(X_resampled, y_resampled)
 
             if verbose:
