@@ -114,7 +114,7 @@ def train_android_ensemble(input_path='data/processed/masaryk_android.csv',
     X, encoders = encode_categorical_features(X, verbose=True)
 
     # Encode target
-    y = df['os_version'].values
+    y = df['os_label'].values
     le = LabelEncoder()
     y_encoded = le.fit_transform(y)
     class_names = le.classes_.tolist()
