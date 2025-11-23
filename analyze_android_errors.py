@@ -52,7 +52,8 @@ def analyze_latest_results():
     print("-"*80)
 
     # Print header
-    print(f"{'Actual \\ Pred':<15}", end="")
+    header = "Actual \\ Pred"
+    print(f"{header:<15}", end="")
     for cls in classes:
         print(f"{cls:<15}", end="")
     print()
